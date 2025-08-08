@@ -55,11 +55,64 @@ impl Frame {
 }
 
 #[derive(Debug)]
+/// Video filters applied to the GStreamer pipeline. For `playbin` this mirrors
+/// the `video-filter` property.Only `videobalance` and `gamma` filters are
+/// currently supported.
+pub struct VideoFilters {
+    balance: Option<gst::Element>,
+    gamma: Option<gst::Element>,
+}
+
+impl Default for VideoFilters {
+    fn default() -> Self {
+        VideoFilters::none()
+    }
+}
+
+impl VideoFilters {
+    /// Returns an empty [`VideoFilters`]. No filters are applied to the
+    /// playback.
+    pub fn none() -> Self {
+        Self {
+            balance: None,
+            gamma: None,
+        }
+    }
+
+    /// Returns a [`VideoFilters`] with only the balance filter set. The brightness,
+    /// saturation, hue and contrast filters can thus be changed.
+    pub fn balance(balance: gst::Element) -> Self {
+        Self {
+            balance: Some(balance),
+            ..Default::default()
+        }
+    }
+
+    /// Returns a [`VideoFilters`] with only the gamma filter set. The gamma
+    /// filter can thus be changed.
+    pub fn gamma(gamma: gst::Element) -> Self {
+        Self {
+            gamma: Some(gamma),
+            ..Default::default()
+        }
+    }
+
+    /// Returns a [`VideoFilters`] with both balance and gamma filters set.
+    pub fn all(balance: gst::Element, gamma: gst::Element) -> Self {
+        Self {
+            balance: Some(balance),
+            gamma: Some(gamma),
+        }
+    }
+}
+
+#[derive(Debug)]
 pub(crate) struct Internal {
     pub(crate) id: u64,
 
     pub(crate) bus: gst::Bus,
     pub(crate) source: gst::Pipeline,
+    pub(crate) video_filters: VideoFilters,
     pub(crate) alive: Arc<AtomicBool>,
     pub(crate) worker: Option<std::thread::JoinHandle<()>>,
 
@@ -217,11 +270,14 @@ impl Drop for Video {
 
 impl Video {
     /// Create a new video player from a given video which loads from `uri`.
+    /// Both balance and gamma filters are enabled and set to their default
+    /// values.
+    ///
     /// Note that live sources will report the duration to be zero.
     pub fn new(uri: &url::Url) -> Result<Self, Error> {
         gst::init()?;
 
-        let pipeline = format!("playbin uri=\"{}\" text-sink=\"appsink name=iced_text sync=true drop=true\" video-sink=\"videoscale ! videoconvert ! appsink name=iced_video drop=true caps=video/x-raw,format=NV12,pixel-aspect-ratio=1/1\"", uri.as_str());
+        let pipeline = format!("playbin uri=\"{}\" text-sink=\"appsink name=iced_text sync=true drop=true\" video-sink=\"videoscale ! videoconvert ! appsink name=iced_video drop=true caps=video/x-raw,format=NV12,pixel-aspect-ratio=1/1\" video-filter=\"videobalance name=balance ! gamma name=gamma\"", uri.as_str());
         let pipeline = gst::parse::launch(pipeline.as_ref())?
             .downcast::<gst::Pipeline>()
             .map_err(|_| Error::Cast)?;
@@ -240,7 +296,24 @@ impl Video {
         let text_sink: gst::Element = pipeline.property("text-sink");
         let text_sink = text_sink.downcast::<gst_app::AppSink>().unwrap();
 
-        Self::from_gst_pipeline(pipeline, video_sink, Some(text_sink))
+        let filter: gst::Element = pipeline.property("video-filter");
+        let pad = filter.pads().first().cloned().unwrap();
+        let pad = pad.dynamic_cast::<gst::GhostPad>().unwrap();
+        let bin = pad
+            .parent_element()
+            .unwrap()
+            .downcast::<gst::Bin>()
+            .unwrap();
+        let balance = bin.by_name("balance").unwrap();
+
+        let gamma: gst::Element = bin.by_name("gamma").unwrap();
+
+        let filters = VideoFilters::all(balance, gamma);
+
+        let mut output = Self::from_gst_pipeline(pipeline, video_sink, Some(text_sink))?;
+        output.set_video_filters(filters);
+
+        Ok(output)
     }
 
     /// Creates a new video based on an existing GStreamer pipeline and appsink.
@@ -418,6 +491,7 @@ impl Video {
 
             bus: pipeline.bus().unwrap(),
             source: pipeline,
+            video_filters: VideoFilters::default(),
             alive,
             worker: Some(worker),
 
@@ -442,6 +516,21 @@ impl Video {
         })))
     }
 
+    /// Sets the [`VideoFilters`] of the [`Video`].
+    pub fn set_video_filters(&mut self, filters: impl Into<VideoFilters>) {
+        self.get_mut().video_filters = filters.into();
+    }
+
+    /// Sets only the balance filter of the [`Video`].
+    pub fn set_video_balance_filter(&mut self, video_balance: gst::Element) {
+        self.get_mut().video_filters.balance = Some(video_balance);
+    }
+
+    /// Sets only the gamma filter of the [`Video`].
+    pub fn set_gamma_filter(&mut self, gamma_bin: gst::Element) {
+        self.get_mut().video_filters.gamma = Some(gamma_bin);
+    }
+
     pub(crate) fn read(&self) -> impl Deref<Target = Internal> + '_ {
         self.0.read().expect("lock")
     }
@@ -462,6 +551,111 @@ impl Video {
     /// Get the framerate of the video as frames per second.
     pub fn framerate(&self) -> f64 {
         self.read().framerate
+    }
+
+    /// Returns the gamma level of the playback. The default gamma level is 1.0.
+    pub fn gamma(&self) -> f64 {
+        let filters = &self.read().video_filters;
+
+        match filters.gamma.as_ref() {
+            Some(gamma) => gamma.property("gamma"),
+            None => 1.0,
+        }
+    }
+
+    /// Sets the gamma level of the playback.
+    /// The gamma is clamped to the range `[1.0, 3.0]`.
+    pub fn set_gamma(&mut self, gamma: f64) {
+        let filters = &mut self.get_mut().video_filters;
+        let Some(bin) = filters.gamma.as_mut() else {
+            return;
+        };
+        let gamma = gamma.clamp(1.0, 3.0);
+        bin.set_property("gamma", gamma);
+    }
+
+    /// Returns the brightness of the playback. The default brightness is 0.0.
+    pub fn brightness(&self) -> f64 {
+        let filters = &self.read().video_filters;
+
+        match filters.balance.as_ref() {
+            Some(balance) => balance.property("brightness"),
+            None => 0.0,
+        }
+    }
+
+    /// Sets the brightness of the playback. The brightness is clamped to the
+    /// range `[-1.0, 1.0]`.
+    pub fn set_brightness(&mut self, brightness: f64) {
+        let filters = &mut self.get_mut().video_filters;
+        let Some(balance) = filters.balance.as_mut() else {
+            return;
+        };
+        let brightness = brightness.clamp(-1.0, 1.0);
+        balance.set_property("brightness", brightness);
+    }
+
+    /// Returns the contrast of the playback. The default contrast is 1.0.
+    pub fn contrast(&self) -> f64 {
+        let filters = &self.read().video_filters;
+
+        match filters.balance.as_ref() {
+            Some(balance) => balance.property("contrast"),
+            None => 1.0,
+        }
+    }
+
+    /// Sets the contrast of the playback. The contrast is clamped to the range
+    /// `[0.0, 2.0]`.
+    pub fn set_contrast(&mut self, contrast: f64) {
+        let filters = &mut self.get_mut().video_filters;
+        let Some(balance) = filters.balance.as_mut() else {
+            return;
+        };
+        let contrast = contrast.clamp(0.0, 2.0);
+        balance.set_property("contrast", contrast);
+    }
+
+    /// Returns the hue of the playback. The default hue is 0.0.
+    pub fn hue(&self) -> f64 {
+        let filters = &self.read().video_filters;
+
+        match filters.balance.as_ref() {
+            Some(balance) => balance.property("hue"),
+            None => 0.0,
+        }
+    }
+
+    /// Sets the hue of the playback. The hue is clamped to the range `[-1.0,
+    /// 1.0]`.
+    pub fn set_hue(&mut self, hue: f64) {
+        let filters = &mut self.get_mut().video_filters;
+        let Some(balance) = filters.balance.as_mut() else {
+            return;
+        };
+        let hue = hue.clamp(-1.0, 1.0);
+        balance.set_property("hue", hue);
+    }
+
+    /// Returns the saturation of the playback. The default saturation is 1.0.
+    pub fn saturation(&self) -> f64 {
+        let filters = &self.read().video_filters;
+
+        match filters.balance.as_ref() {
+            Some(balance) => balance.property("saturation"),
+            None => 1.0,
+        }
+    }
+
+    /// Sets the saturation fo the playback. Saturation is clamped to the range
+    /// `[0.0, 2.0]`.
+    pub fn set_saturation(&mut self, saturation: f64) {
+        let filters = &mut self.get_mut().video_filters;
+        let Some(balance) = filters.balance.as_mut() else {
+            return;
+        };
+        let saturation = saturation.clamp(0.0, 2.0);
+        balance.set_property("saturation", saturation);
     }
 
     /// Set the volume multiplier of the audio.
