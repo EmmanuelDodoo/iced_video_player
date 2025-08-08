@@ -49,7 +49,7 @@ impl Frame {
         Self(gst::Sample::builder().build())
     }
 
-    pub fn readable(&self) -> Option<gst::BufferMap<gst::buffer::Readable>> {
+    pub fn readable(&self) -> Option<gst::BufferMap<'_, gst::buffer::Readable>> {
         self.0.buffer().and_then(|x| x.map_readable().ok())
     }
 }

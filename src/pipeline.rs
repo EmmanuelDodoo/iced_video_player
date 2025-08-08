@@ -95,8 +95,9 @@ impl VideoPipeline {
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: "vs_main",
+                entry_point: Some("vs_main"),
                 buffers: &[],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
@@ -107,7 +108,8 @@ impl VideoPipeline {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: "fs_main",
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
@@ -115,6 +117,7 @@ impl VideoPipeline {
                 })],
             }),
             multiview: None,
+            cache: None,
         });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -189,6 +192,7 @@ impl VideoPipeline {
                 mip_level_count: None,
                 base_array_layer: 0,
                 array_layer_count: None,
+                usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
             });
 
             let view_uv = texture_uv.create_view(&wgpu::TextureViewDescriptor {
@@ -200,6 +204,7 @@ impl VideoPipeline {
                 mip_level_count: None,
                 base_array_layer: 0,
                 array_layer_count: None,
+                usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
             });
 
             let instances = device.create_buffer(&wgpu::BufferDescriptor {
@@ -255,14 +260,14 @@ impl VideoPipeline {
         } = self.videos.get(&video_id).unwrap();
 
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: texture_y,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &frame[..(width * height) as usize],
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width),
                 rows_per_image: Some(height),
@@ -275,14 +280,14 @@ impl VideoPipeline {
         );
 
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: texture_uv,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             &frame[(width * height) as usize..],
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(width),
                 rows_per_image: Some(height / 2),
@@ -352,6 +357,7 @@ impl VideoPipeline {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target,
                     resolve_target: None,
+                    depth_slice: None,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Load,
                         store: wgpu::StoreOp::Store,
