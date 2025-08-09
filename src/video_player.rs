@@ -290,8 +290,6 @@ where
                     Instant::now() + Duration::from_millis(32),
                 ));
             }
-
-            shell.capture_event();
         }
     }
 }
