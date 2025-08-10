@@ -11,6 +11,8 @@ use iced::{
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 
+const SPEED_SIZE_MULT: f32 = 0.75;
+
 pub struct VideoOverlay<'a, Message, Renderer = iced::Renderer>
 where
     Renderer: text::Renderer,
@@ -151,7 +153,7 @@ where
         };
 
         let speed = {
-            let size = renderer.default_size();
+            let size = renderer.default_size() * SPEED_SIZE_MULT;
             let line_height = text::LineHeight::default();
             let height = line_height.to_absolute(size);
             let content = format!("{:.02}", self.speed);
@@ -206,7 +208,7 @@ where
         let color = style.text_color;
         let color = Color { a: alpha, ..color };
 
-        let size = renderer.default_size();
+        let size = renderer.default_size() * SPEED_SIZE_MULT;
         let line_height = text::LineHeight::default();
         let height = line_height.to_absolute(size);
 

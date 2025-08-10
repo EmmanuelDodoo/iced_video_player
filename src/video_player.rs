@@ -7,7 +7,7 @@ use iced::{
         widget::{self, tree},
         Widget,
     },
-    window, Color, Element, Event, Pixels, Rectangle, Vector,
+    keyboard, window, Color, Element, Event, Pixels, Rectangle, Vector,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use log::error;
@@ -45,6 +45,8 @@ where
     pub(crate) captions: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) previous: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) next: Option<(Icon<Renderer::Font>, Message)>,
+    on_keypress: Option<Box<dyn Fn(KeyPress) -> Message + 'a>>,
+    on_click: Option<Box<dyn Fn(MouseClick) -> Message + 'a>>,
     _phantom: PhantomData<Theme>,
 }
 
@@ -68,6 +70,8 @@ where
             captions: None,
             next: None,
             previous: None,
+            on_keypress: None,
+            on_click: None,
             _phantom: Default::default(),
         }
     }
@@ -174,6 +178,28 @@ where
             ..self
         }
     }
+
+    /// Sets the message produced when a [`KeyPress`] is received.
+    pub fn on_keypress<F>(self, on_keypress: F) -> Self
+    where
+        F: 'a + Fn(KeyPress) -> Message,
+    {
+        VideoPlayer {
+            on_keypress: Some(Box::new(on_keypress)),
+            ..self
+        }
+    }
+
+    /// Sets the message produced when a [`MouseClick`] is received.
+    pub fn on_click<F>(self, on_click: F) -> Self
+    where
+        F: 'a + Fn(MouseClick) -> Message,
+    {
+        VideoPlayer {
+            on_click: Some(Box::new(on_click)),
+            ..self
+        }
+    }
 }
 
 impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
@@ -194,10 +220,7 @@ where
     }
 
     fn state(&self) -> tree::State {
-        tree::State::new(State {
-            show_overlay: false,
-            overlay: false,
-        })
+        tree::State::new(State::new())
     }
 
     fn layout(
@@ -304,6 +327,42 @@ where
         _viewport: &iced::Rectangle,
     ) {
         match event {
+            Event::Keyboard(keyboard::Event::ModifiersChanged(new)) => {
+                let state = state.state.downcast_mut::<State>();
+                state.modifiers = *new;
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed { key, modifiers, .. }) => {
+                if let Some(on_keypress) = &self.on_keypress {
+                    let keypress = KeyPress {
+                        key: key.clone(),
+                        modifiers: *modifiers,
+                    };
+                    shell.publish((on_keypress)(keypress));
+                    shell.capture_event();
+                }
+            }
+            Event::Mouse(mouse::Event::ButtonPressed(button))
+                if cursor.is_over(layout.bounds()) =>
+            {
+                if let Some(on_click) = &self.on_click {
+                    let state = state.state.downcast_mut::<State>();
+                    let click = mouse::Click::new(
+                        cursor.position_over(layout.bounds()).unwrap(),
+                        *button,
+                        state.last_click,
+                    );
+
+                    let mouse_click = MouseClick {
+                        button: *button,
+                        modifiers: state.modifiers,
+                        kind: click.kind(),
+                    };
+                    shell.publish((on_click)(mouse_click));
+                    shell.capture_event();
+
+                    state.last_click = Some(click);
+                }
+            }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Mouse(mouse::Event::CursorLeft)
             | Event::Mouse(mouse::Event::CursorEntered) => {
@@ -427,4 +486,37 @@ where
 pub(crate) struct State {
     pub(crate) show_overlay: bool,
     pub(crate) overlay: bool,
+    last_click: Option<mouse::Click>,
+    modifiers: keyboard::Modifiers,
+}
+
+impl State {
+    fn new() -> Self {
+        Self {
+            show_overlay: false,
+            overlay: false,
+            modifiers: keyboard::Modifiers::default(),
+            last_click: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+/// A mouse click.
+pub struct MouseClick {
+    /// The mouse button clicked.
+    pub button: mouse::Button,
+    // The state of keyboard modifiers.
+    pub modifiers: keyboard::Modifiers,
+    /// The kind of mouse click.
+    pub kind: mouse::click::Kind,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// A key press.
+pub struct KeyPress {
+    /// The key pressed.
+    pub key: keyboard::Key,
+    // The state of keyboard modifiers.
+    pub modifiers: keyboard::Modifiers,
 }
