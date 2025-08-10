@@ -44,7 +44,7 @@ use thiserror::Error;
 
 pub use video::Position;
 pub use video::{Video, VideoFilters};
-pub use video_player::{Icon, KeyPress, MouseClick, VideoPlayer};
+pub use video_player::*;
 
 #[derive(Debug, Error)]
 pub enum Error {

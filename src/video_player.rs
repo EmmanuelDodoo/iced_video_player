@@ -1,5 +1,8 @@
 use crate::{overlay::VideoOverlay, pipeline::VideoPrimitive, video::Video};
 use gstreamer as gst;
+pub use iced::advanced::mouse::{click::Kind, Button};
+#[allow(unused_imports)]
+pub use iced::keyboard::{key, Key, Modifiers};
 use iced::{
     advanced::{
         self, layout, mouse, overlay,
@@ -7,7 +10,7 @@ use iced::{
         widget::{self, tree},
         Widget,
     },
-    keyboard, window, Color, Element, Event, Pixels, Rectangle, Vector,
+    keyboard, window, Color, Element, Event, Pixels, Vector,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use log::error;
@@ -40,6 +43,7 @@ where
     on_new_frame: Option<Message>,
     on_subtitle_text: Option<Box<dyn Fn(Option<String>) -> Message + 'a>>,
     on_error: Option<Box<dyn Fn(&glib::Error) -> Message + 'a>>,
+    enable_overlay: bool,
     pub(crate) play_pause: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) fullscreen: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) captions: Option<(Icon<Renderer::Font>, Message)>,
@@ -64,6 +68,7 @@ where
             on_end_of_stream: None,
             on_new_frame: None,
             on_subtitle_text: None,
+            enable_overlay: true,
             on_error: None,
             play_pause: None,
             fullscreen: None,
@@ -129,6 +134,14 @@ where
     pub fn subtitles_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
         VideoPlayer {
             captions: Some((icon, message)),
+            ..self
+        }
+    }
+
+    /// Sets whether the overlay is enabled for video playback.
+    pub fn enable_overlay(self, enable: bool) -> Self {
+        VideoPlayer {
+            enable_overlay: enable,
             ..self
         }
     }
@@ -446,23 +459,38 @@ where
         layout: layout::Layout<'a>,
         _renderer: &Renderer,
         _viewport: &iced::Rectangle,
-        translation: iced::Vector,
+        _translation: iced::Vector,
     ) -> Option<overlay::Element<'a, Message, Theme, Renderer>> {
         let state = state.state.downcast_mut::<State>();
-        if !state.show_overlay && !state.overlay {
+        if !self.enable_overlay || (!state.show_overlay && !state.overlay) {
             state.overlay = false;
 
             return None;
         }
+        let inner = self.video.read();
 
+        // bounds based on `Image::draw`
+        let image_size = iced::Size::new(inner.width as f32, inner.height as f32);
         let bounds = layout.bounds();
-        let translation = Vector::ZERO + translation;
-        let bounds = {
-            let position = bounds.position() + translation;
-            let size = bounds.size();
+        let adjusted_fit = self.content_fit.fit(image_size, bounds.size());
+        let scale = Vector::new(
+            adjusted_fit.width / image_size.width,
+            adjusted_fit.height / image_size.height,
+        );
+        let final_size = image_size * scale;
 
-            Rectangle::new(position, size)
+        let position = match self.content_fit {
+            iced::ContentFit::None => iced::Point::new(
+                bounds.x + (image_size.width - adjusted_fit.width) / 2.0,
+                bounds.y + (image_size.height - adjusted_fit.height) / 2.0,
+            ),
+            _ => iced::Point::new(
+                bounds.center_x() - final_size.width / 2.0,
+                bounds.center_y() - final_size.height / 2.0,
+            ),
         };
+
+        let bounds = iced::Rectangle::new(position, final_size);
 
         let speed = self.video.speed();
 
@@ -505,18 +533,18 @@ impl State {
 /// A mouse click.
 pub struct MouseClick {
     /// The mouse button clicked.
-    pub button: mouse::Button,
+    pub button: Button,
     // The state of keyboard modifiers.
-    pub modifiers: keyboard::Modifiers,
+    pub modifiers: Modifiers,
     /// The kind of mouse click.
-    pub kind: mouse::click::Kind,
+    pub kind: Kind,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 /// A key press.
 pub struct KeyPress {
     /// The key pressed.
-    pub key: keyboard::Key,
+    pub key: Key,
     // The state of keyboard modifiers.
-    pub modifiers: keyboard::Modifiers,
+    pub modifiers: Modifiers,
 }

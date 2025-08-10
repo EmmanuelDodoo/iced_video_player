@@ -7,7 +7,7 @@ use iced::{
         renderer::Quad,
         text::{self, paragraph::Plain, Text},
     },
-    alignment, color, mouse, Color, Event, Rectangle, Size,
+    alignment, color, mouse, Color, Event, Point, Rectangle, Size,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 
@@ -62,7 +62,7 @@ where
         let horizontal_padding = 10.0;
         let vertical_padding = 10.0;
         let bounds_size = self.bounds.size();
-        let bounds_position = self.bounds.position();
+        let bounds_position = Point::ORIGIN;
         let mut paragraph: Plain<Renderer::Paragraph> = Plain::default();
 
         let mut min_bounds = |icon: &Icon<Renderer::Font>| {
@@ -157,10 +157,11 @@ where
             let line_height = text::LineHeight::default();
             let height = line_height.to_absolute(size);
             let content = format!("{:.02}", self.speed);
+            let font = <Renderer as text::Renderer>::MONOSPACE_FONT;
 
             let text = Text {
                 content: content.as_str(),
-                font: renderer.default_font(),
+                font,
                 size,
                 bounds: Size::new(f32::INFINITY, height.0),
                 line_height,
@@ -182,7 +183,7 @@ where
             bounds_size,
             vec![speed, play, previous, next, fullscreen, captions],
         )
-        .move_to(bounds_position)
+        .move_to(self.bounds.position())
     }
 
     fn draw(
