@@ -1752,6 +1752,7 @@ dependencies = [
  "gstreamer-app",
  "gstreamer-base",
  "iced",
+ "iced_graphics",
  "iced_wgpu",
  "log",
  "thiserror 1.0.69",

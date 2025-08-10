@@ -1,18 +1,36 @@
-use crate::{pipeline::VideoPrimitive, video::Video};
+use crate::{overlay::VideoOverlay, pipeline::VideoPrimitive, video::Video};
 use gstreamer as gst;
 use iced::{
-    advanced::{self, layout, widget, Widget},
-    Element,
+    advanced::{
+        self, layout, mouse, overlay,
+        text::{self},
+        widget::{self, tree},
+        Widget,
+    },
+    window, Color, Element, Event, Pixels, Rectangle, Vector,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use log::error;
-use std::{marker::PhantomData, sync::atomic::Ordering, time::Duration};
+use std::{f32, marker::PhantomData, sync::atomic::Ordering, time::Duration};
 use std::{sync::Arc, time::Instant};
+
+#[derive(Debug, Clone, Copy)]
+/// An icon for the overlay on the [`VideoPlayer`].
+pub struct Icon<Font> {
+    /// The font that will be used to display the `code_point`.
+    pub font: Font,
+    /// The unicode code point that will be used as the icon.
+    pub code_point: char,
+    /// The font size of the content.
+    pub size: Option<Pixels>,
+    // The font color of the content.
+    pub color: Option<Color>,
+}
 
 /// Video player widget which displays the current frame of a [`Video`](crate::Video).
 pub struct VideoPlayer<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
-    Renderer: PrimitiveRenderer,
+    Renderer: PrimitiveRenderer + text::Renderer,
 {
     video: &'a Video,
     content_fit: iced::ContentFit,
@@ -22,12 +40,17 @@ where
     on_new_frame: Option<Message>,
     on_subtitle_text: Option<Box<dyn Fn(Option<String>) -> Message + 'a>>,
     on_error: Option<Box<dyn Fn(&glib::Error) -> Message + 'a>>,
-    _phantom: PhantomData<(Theme, Renderer)>,
+    pub(crate) play_pause: Option<(Icon<Renderer::Font>, Message)>,
+    pub(crate) fullscreen: Option<(Icon<Renderer::Font>, Message)>,
+    pub(crate) captions: Option<(Icon<Renderer::Font>, Message)>,
+    pub(crate) previous: Option<(Icon<Renderer::Font>, Message)>,
+    pub(crate) next: Option<(Icon<Renderer::Font>, Message)>,
+    _phantom: PhantomData<Theme>,
 }
 
 impl<'a, Message, Theme, Renderer> VideoPlayer<'a, Message, Theme, Renderer>
 where
-    Renderer: PrimitiveRenderer,
+    Renderer: PrimitiveRenderer + text::Renderer,
 {
     /// Creates a new video player widget for a given video.
     pub fn new(video: &'a Video) -> Self {
@@ -40,6 +63,11 @@ where
             on_new_frame: None,
             on_subtitle_text: None,
             on_error: None,
+            play_pause: None,
+            fullscreen: None,
+            captions: None,
+            next: None,
+            previous: None,
             _phantom: Default::default(),
         }
     }
@@ -56,6 +84,47 @@ where
     pub fn height(self, height: impl Into<iced::Length>) -> Self {
         VideoPlayer {
             height: height.into(),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for, and the `Message` produced by the play/pause/restart
+    /// overlay.
+    pub fn play_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
+        VideoPlayer {
+            play_pause: Some((icon, message)),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for, and the `Messaged` produced by the next overlay.
+    pub fn next_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
+        VideoPlayer {
+            next: Some((icon, message)),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for, and the `Messaged` produced by the previous overlay.
+    pub fn previous_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
+        VideoPlayer {
+            previous: Some((icon, message)),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for, and the `Messaged` produced by the fullscreen overlay.
+    pub fn fullscreen_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
+        VideoPlayer {
+            fullscreen: Some((icon, message)),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for, and the `Messaged` produced by the captions overlay.
+    pub fn subtitles_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
+        VideoPlayer {
+            captions: Some((icon, message)),
             ..self
         }
     }
@@ -111,13 +180,24 @@ impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for VideoPlayer<'_, Message, Theme, Renderer>
 where
     Message: Clone,
-    Renderer: PrimitiveRenderer,
+    Renderer: PrimitiveRenderer + text::Renderer,
 {
     fn size(&self) -> iced::Size<iced::Length> {
         iced::Size {
             width: iced::Length::Shrink,
             height: iced::Length::Shrink,
         }
+    }
+
+    fn tag(&self) -> tree::Tag {
+        tree::Tag::of::<State>()
+    }
+
+    fn state(&self) -> tree::State {
+        tree::State::new(State {
+            show_overlay: false,
+            overlay: false,
+        })
     }
 
     fn layout(
@@ -214,83 +294,121 @@ where
 
     fn update(
         &mut self,
-        _state: &mut widget::Tree,
+        state: &mut widget::Tree,
         event: &iced::Event,
-        _layout: advanced::Layout<'_>,
-        _cursor: advanced::mouse::Cursor,
+        layout: advanced::Layout<'_>,
+        cursor: advanced::mouse::Cursor,
         _renderer: &Renderer,
         _clipboard: &mut dyn advanced::Clipboard,
         shell: &mut advanced::Shell<'_, Message>,
         _viewport: &iced::Rectangle,
     ) {
-        let mut inner = self.video.write();
-
-        if let iced::Event::Window(iced::window::Event::RedrawRequested(_)) = event {
-            if inner.restart_stream || (!inner.is_eos && !inner.paused()) {
-                let mut restart_stream = false;
-                if inner.restart_stream {
-                    restart_stream = true;
-                    // Set flag to false to avoid potentially multiple seeks
-                    inner.restart_stream = false;
-                }
-                let mut eos_pause = false;
-
-                while let Some(msg) = inner
-                    .bus
-                    .pop_filtered(&[gst::MessageType::Error, gst::MessageType::Eos])
-                {
-                    match msg.view() {
-                        gst::MessageView::Error(err) => {
-                            error!("bus returned an error: {err}");
-                            if let Some(ref on_error) = self.on_error {
-                                shell.publish(on_error(&err.error()))
-                            };
-                        }
-                        gst::MessageView::Eos(_eos) => {
-                            if let Some(on_end_of_stream) = self.on_end_of_stream.clone() {
-                                shell.publish(on_end_of_stream);
-                            }
-                            if inner.looping {
-                                restart_stream = true;
-                            } else {
-                                eos_pause = true;
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                // Don't run eos_pause if restart_stream is true; fixes "pausing" after restarting a stream
-                if restart_stream {
-                    if let Err(err) = inner.restart_stream() {
-                        error!("cannot restart stream (can't seek): {err:#?}");
-                    }
-                } else if eos_pause {
-                    inner.is_eos = true;
-                    inner.set_paused(true);
-                }
-
-                if inner.upload_frame.load(Ordering::SeqCst) {
-                    if let Some(on_new_frame) = self.on_new_frame.clone() {
-                        shell.publish(on_new_frame);
-                    }
-                }
-
-                if let Some(on_subtitle_text) = &self.on_subtitle_text {
-                    if inner.upload_text.swap(false, Ordering::SeqCst) {
-                        if let Ok(text) = inner.subtitle_text.try_lock() {
-                            shell.publish(on_subtitle_text(text.clone()));
-                        }
-                    }
-                }
-
-                shell.request_redraw_at(iced::window::RedrawRequest::NextFrame);
-            } else {
-                shell.request_redraw_at(iced::window::RedrawRequest::At(
-                    Instant::now() + Duration::from_millis(32),
-                ));
+        match event {
+            Event::Mouse(mouse::Event::CursorMoved { .. })
+            | Event::Mouse(mouse::Event::CursorLeft)
+            | Event::Mouse(mouse::Event::CursorEntered) => {
+                let state = state.state.downcast_mut::<State>();
+                state.show_overlay = cursor.is_over(layout.bounds()) || cursor.is_levitating();
             }
+            Event::Window(window::Event::RedrawRequested(_)) => {
+                let mut inner = self.video.write();
+                if inner.restart_stream || (!inner.is_eos && !inner.paused()) {
+                    let mut restart_stream = false;
+                    if inner.restart_stream {
+                        restart_stream = true;
+                        // Set flag to false to avoid potentially multiple seeks
+                        inner.restart_stream = false;
+                    }
+                    let mut eos_pause = false;
+
+                    while let Some(msg) = inner
+                        .bus
+                        .pop_filtered(&[gst::MessageType::Error, gst::MessageType::Eos])
+                    {
+                        match msg.view() {
+                            gst::MessageView::Error(err) => {
+                                error!("bus returned an error: {err}");
+                                if let Some(ref on_error) = self.on_error {
+                                    shell.publish(on_error(&err.error()))
+                                };
+                            }
+                            gst::MessageView::Eos(_eos) => {
+                                if let Some(on_end_of_stream) = self.on_end_of_stream.clone() {
+                                    shell.publish(on_end_of_stream);
+                                }
+                                if inner.looping {
+                                    restart_stream = true;
+                                } else {
+                                    eos_pause = true;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    // Don't run eos_pause if restart_stream is true; fixes "pausing" after restarting a stream
+                    if restart_stream {
+                        if let Err(err) = inner.restart_stream() {
+                            error!("cannot restart stream (can't seek): {err:#?}");
+                        }
+                    } else if eos_pause {
+                        inner.is_eos = true;
+                        inner.set_paused(true);
+                    }
+
+                    if inner.upload_frame.load(Ordering::SeqCst) {
+                        if let Some(on_new_frame) = self.on_new_frame.clone() {
+                            shell.publish(on_new_frame);
+                        }
+                    }
+
+                    if let Some(on_subtitle_text) = &self.on_subtitle_text {
+                        if inner.upload_text.swap(false, Ordering::SeqCst) {
+                            if let Ok(text) = inner.subtitle_text.try_lock() {
+                                shell.publish(on_subtitle_text(text.clone()));
+                            }
+                        }
+                    }
+
+                    shell.request_redraw_at(iced::window::RedrawRequest::NextFrame);
+                } else {
+                    shell.request_redraw_at(iced::window::RedrawRequest::At(
+                        Instant::now() + Duration::from_millis(32),
+                    ));
+                }
+            }
+            _ => {}
         }
+    }
+
+    fn overlay<'a>(
+        &'a mut self,
+        state: &'a mut widget::Tree,
+        layout: layout::Layout<'a>,
+        _renderer: &Renderer,
+        _viewport: &iced::Rectangle,
+        translation: iced::Vector,
+    ) -> Option<overlay::Element<'a, Message, Theme, Renderer>> {
+        let state = state.state.downcast_mut::<State>();
+        if !state.show_overlay && !state.overlay {
+            state.overlay = false;
+
+            return None;
+        }
+
+        let bounds = layout.bounds();
+        let translation = Vector::ZERO + translation;
+        let bounds = {
+            let position = bounds.position() + translation;
+            let size = bounds.size();
+
+            Rectangle::new(position, size)
+        };
+
+        let speed = self.video.speed();
+
+        let overlay = VideoOverlay::new(state, self, bounds, speed);
+        Some(overlay::Element::new(Box::new(overlay)))
     }
 }
 
@@ -299,9 +417,14 @@ impl<'a, Message, Theme, Renderer> From<VideoPlayer<'a, Message, Theme, Renderer
 where
     Message: 'a + Clone,
     Theme: 'a,
-    Renderer: 'a + PrimitiveRenderer,
+    Renderer: 'a + PrimitiveRenderer + text::Renderer,
 {
     fn from(video_player: VideoPlayer<'a, Message, Theme, Renderer>) -> Self {
         Self::new(video_player)
     }
+}
+
+pub(crate) struct State {
+    pub(crate) show_overlay: bool,
+    pub(crate) overlay: bool,
 }

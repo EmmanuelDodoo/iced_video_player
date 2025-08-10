@@ -34,6 +34,7 @@
 //!
 //! You can programmatically control the video (e.g., seek, pause, loop, grab thumbnails) by accessing various methods on [`Video`].
 
+mod overlay;
 mod pipeline;
 mod video;
 mod video_player;
@@ -43,7 +44,7 @@ use thiserror::Error;
 
 pub use video::Position;
 pub use video::{Video, VideoFilters};
-pub use video_player::VideoPlayer;
+pub use video_player::{Icon, VideoPlayer};
 
 #[derive(Debug, Error)]
 pub enum Error {

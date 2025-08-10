@@ -1,16 +1,18 @@
 use iced::{
+    font,
     widget::{Button, Column, Container, Row, Slider, Text},
-    Element,
+    Element, Font, Task,
 };
-use iced_video_player::{Video, VideoPlayer};
+use iced_video_player::{Icon, Video, VideoPlayer};
 use std::time::Duration;
 
 fn main() -> iced::Result {
-    iced::run(App::update, App::view)
+    iced::application(App::boot, App::update, App::view).run()
 }
 
 #[derive(Clone, Debug)]
 enum Message {
+    FontLoaded(Result<(), font::Error>),
     TogglePause,
     ToggleLoop,
     Seek(f64),
@@ -25,30 +27,42 @@ struct App {
     dragging: bool,
 }
 
-impl Default for App {
-    fn default() -> Self {
-        App {
-            video: Video::new(
-                &url::Url::from_file_path(
-                    std::path::PathBuf::from(file!())
-                        .parent()
-                        .unwrap()
-                        .join("../.media/test.mp4")
-                        .canonicalize()
-                        .unwrap(),
-                )
-                .unwrap(),
+impl App {
+    fn boot() -> (Self, Task<Message>) {
+        let task =
+            font::load(include_bytes!("../assets/minimal.ttf").as_slice()).map(Message::FontLoaded);
+
+        (Self::new(), task)
+    }
+
+    fn new() -> Self {
+        let mut video = Video::new(
+            &url::Url::from_file_path(
+                std::path::PathBuf::from(file!())
+                    .parent()
+                    .unwrap()
+                    .join("../assets/test3.mp4")
+                    .canonicalize()
+                    .unwrap(),
             )
             .unwrap(),
+        )
+        .unwrap();
+        video.set_gamma(1.5);
+
+        App {
+            video,
             position: 0.0,
             dragging: false,
         }
     }
-}
 
-impl App {
     fn update(&mut self, message: Message) {
         match message {
+            Message::FontLoaded(Err(error)) => {
+                eprintln!("Couldn't load font: \n{error:?}");
+            }
+            Message::FontLoaded(Ok(_)) => {}
             Message::TogglePause => {
                 self.video.set_paused(!self.video.paused());
             }
@@ -79,12 +93,26 @@ impl App {
     }
 
     fn view(&self) -> Element<'_, Message> {
+        let code_point = if self.video.eos() || self.video.paused() {
+            '\u{E800}'
+        } else {
+            '\u{E801}'
+        };
+
+        let icon = Icon {
+            font: Font::with_name("minimal"),
+            code_point,
+            color: None,
+            size: Some(40.0.into()),
+        };
+
         Column::new()
             .push(
                 Container::new(
                     VideoPlayer::new(&self.video)
                         .width(iced::Length::Fill)
                         .height(iced::Length::Fill)
+                        .play_icon(icon, Message::TogglePause)
                         .content_fit(iced::ContentFit::Contain)
                         .on_end_of_stream(Message::EndOfStream)
                         .on_new_frame(Message::NewFrame),
