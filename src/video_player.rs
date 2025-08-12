@@ -47,6 +47,7 @@ where
     on_subtitle_text: Option<Box<dyn Fn(Option<String>) -> Message + 'a>>,
     on_error: Option<Box<dyn Fn(&glib::Error) -> Message + 'a>>,
     enable_overlay: bool,
+    pub(crate) overlay_timeout: u64,
     pub(crate) play_pause: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) fullscreen: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) captions: Option<(Icon<Renderer::Font>, Message)>,
@@ -72,6 +73,7 @@ where
             on_new_frame: None,
             on_subtitle_text: None,
             enable_overlay: true,
+            overlay_timeout: 3,
             on_error: None,
             play_pause: None,
             fullscreen: None,
@@ -96,6 +98,14 @@ where
     pub fn height(self, height: impl Into<iced::Length>) -> Self {
         VideoPlayer {
             height: height.into(),
+            ..self
+        }
+    }
+
+    /// Sets the timeout of the overlay in seconds.
+    pub fn overlay_timeout(self, timeout: u64) -> Self {
+        Self {
+            overlay_timeout: timeout,
             ..self
         }
     }
@@ -482,7 +492,7 @@ where
                         overlay,
                     }) if position.is_some() => {
                         if cursor.position_over(layout.bounds()) == position
-                            && Instant::now().duration_since(time).as_secs() >= Update::TIMEOUT
+                            && Instant::now().duration_since(time).as_secs() >= self.overlay_timeout
                         {
                         } else {
                             state.last_update = Some(Update {
@@ -592,10 +602,6 @@ pub(crate) struct Update {
     pub time: Instant,
     pub parent: Option<Point>,
     pub overlay: Option<Point>,
-}
-
-impl Update {
-    pub const TIMEOUT: u64 = 3;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

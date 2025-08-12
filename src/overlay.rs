@@ -9,7 +9,7 @@ use iced::{
         renderer::Quad,
         text::{self, paragraph::Plain, Text},
     },
-    alignment, color, mouse, Color, Event, Point, Rectangle, Size,
+    alignment, color, mouse, Border, Color, Event, Pixels, Point, Rectangle, Size,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 
@@ -20,6 +20,7 @@ where
     Renderer: text::Renderer,
 {
     state: &'a mut State,
+    timeout: u64,
     bounds: Rectangle,
     speed: f64,
     play_pause: Option<(Icon<Renderer::Font>, Message)>,
@@ -44,6 +45,7 @@ where
             state,
             bounds,
             speed,
+            timeout: player.overlay_timeout,
             play_pause: player.play_pause.clone(),
             fullscreen: player.fullscreen.clone(),
             captions: player.captions.clone(),
@@ -60,7 +62,7 @@ where
     Renderer: advanced::Renderer + text::Renderer,
 {
     fn layout(&mut self, renderer: &Renderer, _bounds: iced::Size) -> layout::Node {
-        let ppn_spacing = 24.0;
+        let ppn_spacing = 48.0;
         let horizontal_padding = 10.0;
         let vertical_padding = 10.0;
         let bounds_size = self.bounds.size();
@@ -69,7 +71,7 @@ where
 
         let mut min_bounds = |icon: &Icon<Renderer::Font>| {
             let size = icon.size.unwrap_or_else(|| renderer.default_size());
-            let line_height = text::LineHeight::default();
+            let line_height = text::LineHeight::Relative(1.0);
             let height = line_height.to_absolute(size);
 
             let mut content = [0; 4];
@@ -107,9 +109,11 @@ where
             Some((icon, _)) => {
                 let play = play.size();
                 let min_bounds = min_bounds(icon);
+                let (_, hor) = padding(min_bounds, icon.size.unwrap_or(renderer.default_size()));
                 let x = bounds_position.x + (bounds_size.width * 0.5)
                     - (play.width * 0.5)
                     - ppn_spacing
+                    - (hor / 2.0)
                     - (min_bounds.width);
                 let y = bounds_position.y + (bounds_size.height * 0.5) - (min_bounds.height * 0.5);
 
@@ -121,7 +125,13 @@ where
             None => Node::default(),
             Some((icon, _)) => {
                 let min_bounds = min_bounds(icon);
-                let x = bounds_position.x + (bounds_size.width * 0.5) + ppn_spacing;
+                let (_, hor) = padding(min_bounds, icon.size.unwrap_or(renderer.default_size()));
+                let play = play.size().width * 0.5;
+                let x = bounds_position.x
+                    + (bounds_size.width * 0.5)
+                    + play
+                    + ppn_spacing
+                    + (hor / 2.0);
 
                 let y = bounds_position.y + (bounds_size.height * 0.5) - (min_bounds.height * 0.5);
 
@@ -203,13 +213,17 @@ where
             && self.captions.is_none();
 
         let alpha = 0.85;
+        let overlay_color = color!(15, 26, 32);
         let clip_bounds = layout.bounds();
         let mut children = layout.children();
 
         let speed_layout = children.next().expect("Missing speed layout");
         let speed = speed_layout.bounds();
-        let color = style.text_color;
-        let color = Color { a: alpha, ..color };
+        let text_color = style.text_color;
+        let text_color = Color {
+            a: alpha,
+            ..text_color
+        };
 
         let size = renderer.default_size() * SPEED_SIZE_MULT;
         let line_height = text::LineHeight::default();
@@ -238,17 +252,16 @@ where
                 },
                 ..Default::default()
             },
-            color!(15, 26, 32, 0.3),
+            overlay_color.scale_alpha(0.3),
         );
-        renderer.fill_text(text, speed.position(), color, clip_bounds);
+        renderer.fill_text(text, speed.position(), text_color, clip_bounds);
 
-        let mut draw = |icon: &Icon<Renderer::Font>, bounds: Rectangle| {
+        let draw = |renderer: &mut Renderer, icon: &Icon<Renderer::Font>, bounds: Rectangle| {
             let color = icon.color.unwrap_or(style.text_color);
             let color = Color { a: alpha, ..color };
 
             let size = icon.size.unwrap_or_else(|| renderer.default_size());
-            let line_height = text::LineHeight::default();
-            let height = line_height.to_absolute(size);
+            let line_height = text::LineHeight::Relative(1.0);
 
             let mut content = [0; 4];
             let content = icon.code_point.encode_utf8(&mut content) as &str;
@@ -258,16 +271,19 @@ where
                 content,
                 font: icon.font,
                 size,
-                bounds: Size::new(f32::INFINITY, height.0),
+                bounds: bounds.size(),
                 line_height,
                 wrapping: text::Wrapping::default(),
                 shaping: text::Shaping::Advanced,
-                align_x: text::Alignment::Left,
-                align_y: alignment::Vertical::Top,
+                align_x: text::Alignment::Center,
+                align_y: alignment::Vertical::Center,
             };
 
-            renderer.fill_text(icon_text, bounds.position(), color, clip_bounds);
+            renderer.fill_text(icon_text, bounds.center(), color, clip_bounds);
         };
+
+        let border = Border::default().rounded(50.0);
+        let background_color = overlay_color.scale_alpha(0.5);
 
         match &self.play_pause {
             None => {
@@ -276,7 +292,21 @@ where
             Some((icon, _)) => {
                 let layout = children.next().expect("Missing play layout");
                 let bounds = layout.bounds();
-                draw(icon, bounds);
+                let (ver, hor) =
+                    padding(bounds.size(), icon.size.unwrap_or(renderer.default_size()));
+
+                let bounds = bounds.expand([ver, hor]);
+
+                renderer.fill_quad(
+                    Quad {
+                        bounds,
+                        border,
+                        ..Default::default()
+                    },
+                    background_color,
+                );
+
+                draw(renderer, icon, bounds);
             }
         };
 
@@ -287,7 +317,21 @@ where
             Some((icon, _)) => {
                 let layout = children.next().expect("Missing previous layout");
                 let bounds = layout.bounds();
-                draw(icon, bounds);
+                let (ver, hor) =
+                    padding(bounds.size(), icon.size.unwrap_or(renderer.default_size()));
+
+                let bounds = bounds.expand([ver, hor]);
+
+                renderer.fill_quad(
+                    Quad {
+                        bounds,
+                        border,
+                        ..Default::default()
+                    },
+                    background_color,
+                );
+
+                draw(renderer, icon, bounds);
             }
         };
 
@@ -298,7 +342,21 @@ where
             Some((icon, _)) => {
                 let layout = children.next().expect("Missing next layout");
                 let bounds = layout.bounds();
-                draw(icon, bounds);
+                let (ver, hor) =
+                    padding(bounds.size(), icon.size.unwrap_or(renderer.default_size()));
+
+                let bounds = bounds.expand([ver, hor]);
+
+                renderer.fill_quad(
+                    Quad {
+                        bounds,
+                        border,
+                        ..Default::default()
+                    },
+                    background_color,
+                );
+
+                draw(renderer, icon, bounds);
             }
         };
 
@@ -309,7 +367,7 @@ where
             Some((icon, _)) => {
                 let layout = children.next().expect("Missing fullscreen layout");
                 let bounds = layout.bounds();
-                draw(icon, bounds);
+                draw(renderer, icon, bounds);
             }
         };
 
@@ -320,7 +378,7 @@ where
             Some((icon, _)) => {
                 let layout = children.next().expect("Missing captions layout");
                 let bounds = layout.bounds();
-                draw(icon, bounds);
+                draw(renderer, icon, bounds);
             }
         };
     }
@@ -409,6 +467,7 @@ where
                 }
             }
             Event::Mouse(mouse::Event::CursorEntered)
+            | Event::Mouse(mouse::Event::CursorLeft)
             | Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 self.state.last_update = match self.state.last_update {
                     Some(Update { time, parent, .. }) => Some(Update {
@@ -437,7 +496,7 @@ where
                         overlay,
                     }) if overlay.is_some() => {
                         if cursor.position_over(layout.bounds()) == overlay
-                            && Instant::now().duration_since(time).as_secs() >= Update::TIMEOUT
+                            && Instant::now().duration_since(time).as_secs() >= self.timeout
                         {
                         } else {
                             self.state.last_update = Some(Update {
@@ -489,4 +548,14 @@ where
             mouse::Interaction::None
         }
     }
+}
+
+fn padding(bounds: Size, size: Pixels) -> (f32, f32) {
+    let padding = size.0 / 3.0;
+    let max = bounds.height.max(bounds.width);
+
+    let hor = padding + (max - bounds.width) / 2.0;
+    let ver = padding + (max - bounds.height) / 2.0;
+
+    (ver, hor)
 }
