@@ -1,4 +1,6 @@
-use crate::{video_player::State, Icon, VideoPlayer};
+use std::time::Instant;
+
+use crate::{video_player::State, Icon, Update, VideoPlayer};
 use iced::{
     advanced::{
         self,
@@ -332,60 +334,139 @@ where
         _clipboard: &mut dyn advanced::Clipboard,
         shell: &mut advanced::Shell<'_, Message>,
     ) {
-        if !cursor.is_over(layout.bounds()) {
-            self.state.overlay = false;
-            return;
-        }
+        match event {
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
+                let mut children = layout.children();
+                let _speed = children.next();
 
-        self.state.overlay = true;
-
-        if let Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) = event {
-            let mut children = layout.children();
-            let _speed = children.next();
-
-            let play = children.next().expect("Update: Missing play layout");
-            if let Some((_, message)) = &self.play_pause {
+                let play = children.next().expect("Update: Missing play layout");
                 if cursor.is_over(play.bounds()) {
-                    shell.publish(message.clone());
-                    shell.capture_event();
-                    return;
+                    self.state.last_update = Some(Update {
+                        time: Instant::now(),
+                        parent: None,
+                        overlay: cursor.position_over(play.bounds()),
+                    });
+                    if let Some((_, message)) = &self.play_pause {
+                        shell.publish(message.clone());
+                        shell.capture_event();
+                        return;
+                    }
                 }
-            }
 
-            let previous = children.next().expect("Update: Missing previous layout");
-            if let Some((_, message)) = &self.previous {
+                let previous = children.next().expect("Update: Missing previous layout");
                 if cursor.is_over(previous.bounds()) {
-                    shell.publish(message.clone());
-                    shell.capture_event();
-                    return;
+                    self.state.last_update = Some(Update {
+                        time: Instant::now(),
+                        parent: None,
+                        overlay: cursor.position_over(previous.bounds()),
+                    });
+                    if let Some((_, message)) = &self.previous {
+                        shell.publish(message.clone());
+                        shell.capture_event();
+                        return;
+                    }
                 }
-            }
 
-            let next = children.next().expect("Update: Missing next layout");
-            if let Some((_, message)) = &self.next {
+                let next = children.next().expect("Update: Missing next layout");
                 if cursor.is_over(next.bounds()) {
-                    shell.publish(message.clone());
-                    shell.capture_event();
-                    return;
+                    self.state.last_update = Some(Update {
+                        time: Instant::now(),
+                        parent: None,
+                        overlay: cursor.position_over(next.bounds()),
+                    });
+                    if let Some((_, message)) = &self.next {
+                        shell.publish(message.clone());
+                        shell.capture_event();
+                        return;
+                    }
                 }
-            }
 
-            let fullscreen = children.next().expect("Update: Missing fullscreen layout");
-            if let Some((_, message)) = &self.fullscreen {
+                let fullscreen = children.next().expect("Update: Missing fullscreen layout");
                 if cursor.is_over(fullscreen.bounds()) {
-                    shell.publish(message.clone());
-                    shell.capture_event();
-                    return;
+                    self.state.last_update = Some(Update {
+                        time: Instant::now(),
+                        parent: None,
+                        overlay: cursor.position_over(fullscreen.bounds()),
+                    });
+                    if let Some((_, message)) = &self.fullscreen {
+                        shell.publish(message.clone());
+                        shell.capture_event();
+                        return;
+                    }
                 }
-            }
 
-            let captions = children.next().expect("Update: Missing captions layout");
-            if let Some((_, message)) = &self.captions {
+                let captions = children.next().expect("Update: Missing captions layout");
                 if cursor.is_over(captions.bounds()) {
-                    shell.publish(message.clone());
-                    shell.capture_event();
+                    self.state.last_update = Some(Update {
+                        time: Instant::now(),
+                        parent: None,
+                        overlay: cursor.position_over(captions.bounds()),
+                    });
+                    if let Some((_, message)) = &self.captions {
+                        shell.publish(message.clone());
+                        shell.capture_event();
+                    }
                 }
             }
+            Event::Mouse(mouse::Event::CursorEntered)
+            | Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                self.state.last_update = match self.state.last_update {
+                    Some(Update { time, parent, .. }) => Some(Update {
+                        time,
+                        parent,
+                        overlay: cursor.position_over(layout.bounds()),
+                    }),
+                    None => {
+                        if cursor.is_over(layout.bounds()) {
+                            Some(Update {
+                                time: Instant::now(),
+                                parent: None,
+                                overlay: cursor.position_over(layout.bounds()),
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                };
+            }
+            Event::Window(iced::window::Event::RedrawRequested(_)) => {
+                match self.state.last_update.take() {
+                    Some(Update {
+                        parent: position,
+                        time,
+                        overlay,
+                    }) if overlay.is_some() => {
+                        if cursor.position_over(layout.bounds()) == overlay
+                            && Instant::now().duration_since(time).as_secs() >= Update::TIMEOUT
+                        {
+                        } else {
+                            self.state.last_update = Some(Update {
+                                time,
+                                parent: position,
+                                overlay,
+                            })
+                        }
+                    }
+                    Some(Update {
+                        parent: None,
+                        overlay: None,
+                        ..
+                    }) => {}
+                    Some(Update {
+                        overlay,
+                        parent,
+                        time,
+                    }) if parent.is_some() => {
+                        self.state.last_update = Some(Update {
+                            time,
+                            parent,
+                            overlay,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
         }
     }
 

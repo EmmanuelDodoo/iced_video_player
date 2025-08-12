@@ -41,7 +41,7 @@ impl App {
                 std::path::PathBuf::from(file!())
                     .parent()
                     .unwrap()
-                    .join("../assets/test3.mp4")
+                    .join("../assets/test.mp4")
                     .canonicalize()
                     .unwrap(),
             )

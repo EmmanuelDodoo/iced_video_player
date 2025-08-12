@@ -10,12 +10,15 @@ use iced::{
         widget::{self, tree},
         Widget,
     },
-    keyboard, window, Color, Element, Event, Pixels, Vector,
+    keyboard, window, Color, Element, Event, Pixels, Point, Vector,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use log::error;
-use std::{f32, marker::PhantomData, sync::atomic::Ordering, time::Duration};
-use std::{sync::Arc, time::Instant};
+use std::{f32, marker::PhantomData, sync::atomic::Ordering};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 #[derive(Debug, Clone, Copy)]
 /// An icon for the overlay on the [`VideoPlayer`].
@@ -357,14 +360,14 @@ where
             Event::Mouse(mouse::Event::ButtonPressed(button))
                 if cursor.is_over(layout.bounds()) =>
             {
-                if let Some(on_click) = &self.on_click {
-                    let state = state.state.downcast_mut::<State>();
-                    let click = mouse::Click::new(
-                        cursor.position_over(layout.bounds()).unwrap(),
-                        *button,
-                        state.last_click,
-                    );
+                let state = state.state.downcast_mut::<State>();
+                let click = mouse::Click::new(
+                    cursor.position_over(layout.bounds()).unwrap(),
+                    *button,
+                    state.last_click,
+                );
 
+                if let Some(on_click) = &self.on_click {
                     let mouse_click = MouseClick {
                         button: *button,
                         modifiers: state.modifiers,
@@ -372,15 +375,37 @@ where
                     };
                     shell.publish((on_click)(mouse_click));
                     shell.capture_event();
-
-                    state.last_click = Some(click);
                 }
+
+                state.last_click = Some(click);
+                state.last_update = Some(Update {
+                    time: Instant::now(),
+                    parent: Some(click.position()),
+                    overlay: None,
+                })
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
             | Event::Mouse(mouse::Event::CursorLeft)
             | Event::Mouse(mouse::Event::CursorEntered) => {
                 let state = state.state.downcast_mut::<State>();
-                state.show_overlay = cursor.is_over(layout.bounds()) || cursor.is_levitating();
+                state.last_update = match state.last_update {
+                    Some(Update { time, overlay, .. }) => Some(Update {
+                        time,
+                        parent: cursor.position_over(layout.bounds()),
+                        overlay,
+                    }),
+                    None => {
+                        if cursor.is_over(layout.bounds()) {
+                            Some(Update {
+                                time: Instant::now(),
+                                parent: cursor.position_over(layout.bounds()),
+                                overlay: None,
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                };
             }
             Event::Window(window::Event::RedrawRequested(_)) => {
                 let mut inner = self.video.write();
@@ -448,6 +473,43 @@ where
                         Instant::now() + Duration::from_millis(32),
                     ));
                 }
+
+                let state = state.state.downcast_mut::<State>();
+                match state.last_update.take() {
+                    Some(Update {
+                        parent: position,
+                        time,
+                        overlay,
+                    }) if position.is_some() => {
+                        if cursor.position_over(layout.bounds()) == position
+                            && Instant::now().duration_since(time).as_secs() >= Update::TIMEOUT
+                        {
+                        } else {
+                            state.last_update = Some(Update {
+                                time,
+                                parent: position,
+                                overlay,
+                            })
+                        }
+                    }
+                    Some(Update {
+                        parent: None,
+                        overlay: None,
+                        ..
+                    }) => {}
+                    Some(Update {
+                        overlay,
+                        parent,
+                        time,
+                    }) if overlay.is_some() => {
+                        state.last_update = Some(Update {
+                            time,
+                            parent,
+                            overlay,
+                        });
+                    }
+                    _ => {}
+                }
             }
             _ => {}
         }
@@ -462,9 +524,7 @@ where
         _translation: iced::Vector,
     ) -> Option<overlay::Element<'a, Message, Theme, Renderer>> {
         let state = state.state.downcast_mut::<State>();
-        if !self.enable_overlay || (!state.show_overlay && !state.overlay) {
-            state.overlay = false;
-
+        if !self.enable_overlay || state.last_update.is_none() {
             return None;
         }
         let inner = self.video.read();
@@ -512,21 +572,30 @@ where
 }
 
 pub(crate) struct State {
-    pub(crate) show_overlay: bool,
-    pub(crate) overlay: bool,
     last_click: Option<mouse::Click>,
     modifiers: keyboard::Modifiers,
+    pub(crate) last_update: Option<Update>,
 }
 
 impl State {
     fn new() -> Self {
         Self {
-            show_overlay: false,
-            overlay: false,
             modifiers: keyboard::Modifiers::default(),
             last_click: None,
+            last_update: None,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Update {
+    pub time: Instant,
+    pub parent: Option<Point>,
+    pub overlay: Option<Point>,
+}
+
+impl Update {
+    pub const TIMEOUT: u64 = 3;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
