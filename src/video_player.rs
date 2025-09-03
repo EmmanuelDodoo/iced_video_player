@@ -44,7 +44,6 @@ where
     height: iced::Length,
     on_end_of_stream: Option<Message>,
     on_new_frame: Option<Message>,
-    on_subtitle_text: Option<Box<dyn Fn(Option<String>) -> Message + 'a>>,
     on_error: Option<Box<dyn Fn(&glib::Error) -> Message + 'a>>,
     enable_overlay: bool,
     pub(crate) overlay_timeout: u64,
@@ -71,7 +70,6 @@ where
             height: iced::Length::Shrink,
             on_end_of_stream: None,
             on_new_frame: None,
-            on_subtitle_text: None,
             enable_overlay: true,
             overlay_timeout: 3,
             on_error: None,
@@ -179,17 +177,6 @@ where
     pub fn on_new_frame(self, on_new_frame: Message) -> Self {
         VideoPlayer {
             on_new_frame: Some(on_new_frame),
-            ..self
-        }
-    }
-
-    /// Message to send when the video receives a new frame.
-    pub fn on_subtitle_text<F>(self, on_subtitle_text: F) -> Self
-    where
-        F: 'a + Fn(Option<String>) -> Message,
-    {
-        VideoPlayer {
-            on_subtitle_text: Some(Box::new(on_subtitle_text)),
             ..self
         }
     }
@@ -466,14 +453,6 @@ where
                     if inner.upload_frame.load(Ordering::SeqCst) {
                         if let Some(on_new_frame) = self.on_new_frame.clone() {
                             shell.publish(on_new_frame);
-                        }
-                    }
-
-                    if let Some(on_subtitle_text) = &self.on_subtitle_text {
-                        if inner.upload_text.swap(false, Ordering::SeqCst) {
-                            if let Ok(text) = inner.subtitle_text.try_lock() {
-                                shell.publish(on_subtitle_text(text.clone()));
-                            }
                         }
                     }
 

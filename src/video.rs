@@ -1,4 +1,5 @@
 use crate::Error;
+use glib::FlagsClass;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use gstreamer_app::prelude::*;
@@ -8,6 +9,8 @@ use std::ops::{Deref, DerefMut};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
+
+use subtitles::SubtitleFontDescription;
 
 /// Position in the media.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -123,6 +126,9 @@ pub(crate) struct Internal {
     pub(crate) speed: f64,
     pub(crate) sync_av: bool,
 
+    pub(crate) show_subtitles: bool,
+    pub(crate) subtitle_description: SubtitleFontDescription,
+
     pub(crate) frame: Arc<Mutex<Frame>>,
     pub(crate) upload_frame: Arc<AtomicBool>,
     pub(crate) last_frame_time: Arc<Mutex<Instant>>,
@@ -131,9 +137,6 @@ pub(crate) struct Internal {
     pub(crate) restart_stream: bool,
     pub(crate) sync_av_avg: u64,
     pub(crate) sync_av_counter: u64,
-
-    pub(crate) subtitle_text: Arc<Mutex<Option<String>>>,
-    pub(crate) upload_text: Arc<AtomicBool>,
 }
 
 impl Internal {
@@ -169,9 +172,6 @@ impl Internal {
                 gst::format::Default::NONE,
             )?,
         };
-
-        *self.subtitle_text.lock().expect("lock subtitle_text") = None;
-        self.upload_text.store(true, Ordering::SeqCst);
 
         Ok(())
     }
@@ -241,6 +241,36 @@ impl Internal {
             }
         }
     }
+
+    fn toggle_subtitles(&mut self) {
+        let pipeline = &self.source;
+
+        let flags = pipeline.property_value("flags");
+        let flags_class = FlagsClass::with_type(flags.type_()).unwrap();
+        let builder = flags_class.builder_with_value(flags).unwrap();
+
+        let flags = if self.show_subtitles {
+            builder.unset_by_nick("text")
+        } else {
+            builder.set_by_nick("text")
+        }
+        .build()
+        .unwrap();
+
+        pipeline.set_property_from_value("flags", &flags);
+        self.show_subtitles = !self.show_subtitles;
+    }
+
+    fn set_subtitle_description(&mut self, description: SubtitleFontDescription) {
+        let pipeline = &self.source;
+
+        self.subtitle_description = description;
+        pipeline.set_property("subtitle-font-desc", description.to_string());
+    }
+
+    fn set_text(&mut self, text: TextTag) {
+        self.source.set_property("current-text", text.id);
+    }
 }
 
 /// A multimedia video loaded from a URI (e.g., a local file path or HTTP stream).
@@ -277,7 +307,7 @@ impl Video {
     pub fn new(uri: &url::Url) -> Result<Self, Error> {
         gst::init()?;
 
-        let pipeline = format!("playbin uri=\"{}\" text-sink=\"appsink name=iced_text sync=true drop=true\" video-sink=\"videoscale ! videoconvert ! appsink name=iced_video drop=true caps=video/x-raw,format=NV12,pixel-aspect-ratio=1/1\" video-filter=\"videobalance name=balance ! gamma name=gamma\" audio-filter= \"pitch name=pitch\"", uri.as_str());
+        let pipeline = format!("playbin uri=\"{}\"  video-sink=\"videoscale ! videoconvert ! appsink name=iced_video drop=true caps=video/x-raw,format=NV12,pixel-aspect-ratio=1/1\" video-filter=\"videobalance name=balance ! gamma name=gamma\" audio-filter= \"pitch name=pitch\"", uri.as_str());
         let pipeline = gst::parse::launch(pipeline.as_ref())?
             .downcast::<gst::Pipeline>()
             .map_err(|_| Error::Cast)?;
@@ -293,9 +323,6 @@ impl Video {
         let video_sink = bin.by_name("iced_video").unwrap();
         let video_sink = video_sink.downcast::<gst_app::AppSink>().unwrap();
 
-        let text_sink: gst::Element = pipeline.property("text-sink");
-        let text_sink = text_sink.downcast::<gst_app::AppSink>().unwrap();
-
         let filter: gst::Element = pipeline.property("video-filter");
         let pad = filter.pads().first().cloned().unwrap();
         let pad = pad.dynamic_cast::<gst::GhostPad>().unwrap();
@@ -310,7 +337,12 @@ impl Video {
 
         let filters = VideoFilters::all(balance, gamma);
 
-        let mut output = Self::from_gst_pipeline(pipeline, video_sink, Some(text_sink))?;
+        let mut output = Self::from_gst_pipeline(
+            pipeline,
+            video_sink,
+            false,
+            SubtitleFontDescription::default(),
+        )?;
         output.set_video_filters(filters);
 
         Ok(output)
@@ -319,19 +351,32 @@ impl Video {
     /// Creates a new video based on an existing GStreamer pipeline and appsink.
     /// Expects an `appsink` plugin with `caps=video/x-raw,format=NV12`.
     ///
-    /// An optional `text_sink` can be provided, which enables subtitle messages
-    /// to be emitted.
-    ///
     /// **Note:** Many functions of [`Video`] assume a `playbin` pipeline.
     /// Non-`playbin` pipelines given here may not have full functionality.
     pub fn from_gst_pipeline(
         pipeline: gst::Pipeline,
         video_sink: gst_app::AppSink,
-        text_sink: Option<gst_app::AppSink>,
+        show_subtitles: bool,
+        subtitle_description: SubtitleFontDescription,
     ) -> Result<Self, Error> {
         gst::init()?;
         static NEXT_ID: AtomicU64 = AtomicU64::new(0);
         let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
+
+        let flags = pipeline.property_value("flags");
+        let flags_class = FlagsClass::with_type(flags.type_()).unwrap();
+        let builder = flags_class.builder_with_value(flags).unwrap();
+        let flags = if show_subtitles {
+            builder.set_by_nick("text")
+        } else {
+            builder.unset_by_nick("text")
+        }
+        .build()
+        .unwrap();
+
+        pipeline.set_property_from_value("flags", &flags);
+
+        pipeline.set_property("subtitle-font-desc", subtitle_description.to_string());
 
         // We need to ensure we stop the pipeline if we hit an error,
         // or else there may be audio left playing in the background.
@@ -391,16 +436,9 @@ impl Video {
         let alive_ref = Arc::clone(&alive);
         let last_frame_time_ref = Arc::clone(&last_frame_time);
 
-        let subtitle_text = Arc::new(Mutex::new(None));
-        let upload_text = Arc::new(AtomicBool::new(false));
-        let subtitle_text_ref = Arc::clone(&subtitle_text);
-        let upload_text_ref = Arc::clone(&upload_text);
-
         let pipeline_ref = pipeline.clone();
 
         let worker = std::thread::spawn(move || {
-            let mut clear_subtitles_at = None;
-
             while alive_ref.load(Ordering::Acquire) {
                 if let Err(gst::FlowError::Error) = (|| -> Result<(), gst::FlowError> {
                     let sample =
@@ -418,10 +456,6 @@ impl Video {
                         .lock()
                         .map_err(|_| gst::FlowError::Error)? = Instant::now();
 
-                    let frame_segment = sample.segment().cloned().ok_or(gst::FlowError::Error)?;
-                    let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
-                    let frame_pts = buffer.pts().ok_or(gst::FlowError::Error)?;
-                    let frame_duration = buffer.duration().ok_or(gst::FlowError::Error)?;
                     {
                         let mut frame_guard =
                             frame_ref.lock().map_err(|_| gst::FlowError::Error)?;
@@ -429,55 +463,6 @@ impl Video {
                     }
 
                     upload_frame_ref.swap(true, Ordering::SeqCst);
-
-                    if let Some(at) = clear_subtitles_at {
-                        if frame_pts >= at {
-                            *subtitle_text_ref
-                                .lock()
-                                .map_err(|_| gst::FlowError::Error)? = None;
-                            upload_text_ref.store(true, Ordering::SeqCst);
-                            clear_subtitles_at = None;
-                        }
-                    }
-
-                    let text = text_sink
-                        .as_ref()
-                        .and_then(|sink| sink.try_pull_sample(gst::ClockTime::from_seconds(0)));
-                    if let Some(text) = text {
-                        let text_segment = text.segment().ok_or(gst::FlowError::Error)?;
-                        let text = text.buffer().ok_or(gst::FlowError::Error)?;
-                        let text_pts = text.pts().ok_or(gst::FlowError::Error)?;
-                        let text_duration = text.duration().ok_or(gst::FlowError::Error)?;
-
-                        let frame_running_time = frame_segment.to_running_time(frame_pts).value();
-                        let frame_running_time_end = frame_segment
-                            .to_running_time(frame_pts + frame_duration)
-                            .value();
-
-                        let text_running_time = text_segment.to_running_time(text_pts).value();
-                        let text_running_time_end = text_segment
-                            .to_running_time(text_pts + text_duration)
-                            .value();
-
-                        // see gst-plugins-base/ext/pango/gstbasetextoverlay.c (gst_base_text_overlay_video_chain)
-                        // as an example of how to correctly synchronize the text+video segments
-                        if text_running_time_end > frame_running_time
-                            && frame_running_time_end > text_running_time
-                        {
-                            let duration = text.duration().unwrap_or(gst::ClockTime::ZERO);
-                            let map = text.map_readable().map_err(|_| gst::FlowError::Error)?;
-
-                            let text = std::str::from_utf8(map.as_slice())
-                                .map_err(|_| gst::FlowError::Error)?
-                                .to_string();
-                            *subtitle_text_ref
-                                .lock()
-                                .map_err(|_| gst::FlowError::Error)? = Some(text);
-                            upload_text_ref.store(true, Ordering::SeqCst);
-
-                            clear_subtitles_at = Some(text_pts + duration);
-                        }
-                    }
 
                     Ok(())
                 })() {
@@ -502,6 +487,9 @@ impl Video {
             speed: 1.0,
             sync_av,
 
+            show_subtitles,
+            subtitle_description,
+
             frame,
             upload_frame,
             last_frame_time,
@@ -510,9 +498,6 @@ impl Video {
             restart_stream: false,
             sync_av_avg: 0,
             sync_av_counter: 0,
-
-            subtitle_text,
-            upload_text,
         })))
     }
 
@@ -745,6 +730,65 @@ impl Video {
         self.get_mut().restart_stream()
     }
 
+    /// Shows/Hides the subtitles on the media.
+    pub fn toggle_subtitle(&mut self) {
+        self.get_mut().toggle_subtitles()
+    }
+
+    /// Returns whether the subtitles is being shown or not.
+    pub fn show_subtitles(&self) -> bool {
+        self.read().show_subtitles
+    }
+
+    /// Returns the [`SubtitleFontDescription`] of the media.
+    pub fn subtitle_description(&self) -> SubtitleFontDescription {
+        self.read().subtitle_description
+    }
+
+    /// Sets the [`SubtitleFontDescription`] of the media.
+    pub fn set_subtitle_description(&mut self, description: SubtitleFontDescription) {
+        self.get_mut().set_subtitle_description(description)
+    }
+
+    /// Returns a list of available subtitles for the media.
+    pub fn available_subtitles(&self) -> Vec<TextTag> {
+        let pipeline = &self.read().source;
+        let n = pipeline.property::<i32>("n-text");
+
+        (0..n)
+            .filter_map(|id| {
+                let tags =
+                    pipeline.emit_by_name::<Option<gst::TagList>>("get-text-tags", &[&id])?;
+                let codec = tags.get::<gst::tags::LanguageCode>()?;
+
+                Some(TextTag {
+                    id,
+                    language_code: codec.get().to_owned(),
+                })
+            })
+            .collect()
+    }
+
+    /// Sets the subtitle to be shown for the media.
+    pub fn set_text(&mut self, text: TextTag) {
+        self.get_mut().set_text(text)
+    }
+
+    /// Gets the current subtitle of the media, if any.
+    pub fn get_text(&self) -> Option<TextTag> {
+        let pipeline = &self.read().source;
+
+        let id = pipeline.property::<i32>("current-text");
+
+        let tags = pipeline.emit_by_name::<Option<gst::TagList>>("get-text-tags", &[&id])?;
+        let codec = tags.get::<gst::tags::LanguageCode>()?;
+
+        Some(TextTag {
+            id,
+            language_code: codec.get().to_owned(),
+        })
+    }
+
     /// Set the subtitle URL to display.
     pub fn set_subtitle_url(&mut self, url: &url::Url) -> Result<(), Error> {
         let paused = self.paused();
@@ -845,4 +889,119 @@ fn yuv_to_rgba(yuv: &[u8], width: u32, height: u32, downscale: u32) -> Vec<u8> {
     }
 
     rgba
+}
+
+#[derive(Debug, Clone)]
+/// Subtitle meta data.
+pub struct TextTag {
+    id: i32,
+    /// The language of the subtitle.
+    pub language_code: String,
+}
+
+pub mod subtitles {
+    #[derive(Debug, Clone, Copy, Default, PartialEq)]
+    /// A font family.
+    pub enum Family {
+        Normal,
+        #[default]
+        Sans,
+        Serif,
+        Monospace,
+    }
+
+    impl Family {
+        /// Returns a str representation of the [`Family`].
+        pub fn to_str<'a>(self) -> &'a str {
+            match self {
+                Self::Normal => "Normal",
+                Self::Sans => "Sans",
+                Self::Serif => "Serif",
+                Self::Monospace => "Monospace",
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, Default, PartialEq)]
+    /// The style of the subtitle text.
+    pub enum Style {
+        #[default]
+        Normal,
+        Oblique,
+        Italic,
+    }
+
+    impl Style {
+        /// Returns a str representation of the [`Style`].
+        pub fn to_str<'a>(self) -> &'a str {
+            match self {
+                Self::Normal => "Normal",
+                Self::Italic => "Italic",
+                Self::Oblique => "Oblique",
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, Default, PartialEq)]
+    /// The weight of the subtitle text.
+    pub enum Weight {
+        Thin,
+        Light,
+        Regular,
+        #[default]
+        Medium,
+        SemiBold,
+        Bold,
+        Black,
+        Heavy,
+    }
+
+    impl Weight {
+        /// Returns a str representation of the [`Weight`].
+        pub fn to_str<'a>(self) -> &'a str {
+            match self {
+                Self::Thin => "Thin",
+                Self::Light => "Light",
+                Self::Regular => "Regular",
+                Self::Medium => "Medium",
+                Self::SemiBold => "SemiBold",
+                Self::Bold => "Bold",
+                Self::Black => "Black",
+                Self::Heavy => "Heavy",
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Copy, PartialEq)]
+    /// Font rendering options for subtitles.
+    pub struct SubtitleFontDescription {
+        pub family: Family,
+        pub style: Style,
+        pub weight: Weight,
+        pub size: u8,
+    }
+
+    impl Default for SubtitleFontDescription {
+        fn default() -> Self {
+            Self {
+                size: 12,
+                family: Family::default(),
+                style: Style::default(),
+                weight: Weight::default(),
+            }
+        }
+    }
+
+    impl std::fmt::Display for SubtitleFontDescription {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                f,
+                "{} {} {} {}",
+                self.family.to_str(),
+                self.style.to_str(),
+                self.weight.to_str(),
+                self.size
+            )
+        }
+    }
 }
