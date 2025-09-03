@@ -126,7 +126,7 @@ pub(crate) struct Internal {
     pub(crate) speed: f64,
     pub(crate) sync_av: bool,
 
-    pub(crate) show_subtitles: bool,
+    pub(crate) subtitles: bool,
     pub(crate) subtitle_description: SubtitleFontDescription,
 
     pub(crate) frame: Arc<Mutex<Frame>>,
@@ -249,7 +249,7 @@ impl Internal {
         let flags_class = FlagsClass::with_type(flags.type_()).unwrap();
         let builder = flags_class.builder_with_value(flags).unwrap();
 
-        let flags = if self.show_subtitles {
+        let flags = if self.subtitles {
             builder.unset_by_nick("text")
         } else {
             builder.set_by_nick("text")
@@ -258,7 +258,7 @@ impl Internal {
         .unwrap();
 
         pipeline.set_property_from_value("flags", &flags);
-        self.show_subtitles = !self.show_subtitles;
+        self.subtitles = !self.subtitles;
     }
 
     fn set_subtitle_description(&mut self, description: SubtitleFontDescription) {
@@ -487,7 +487,7 @@ impl Video {
             speed: 1.0,
             sync_av,
 
-            show_subtitles,
+            subtitles: show_subtitles,
             subtitle_description,
 
             frame,
@@ -736,8 +736,8 @@ impl Video {
     }
 
     /// Returns whether the subtitles is being shown or not.
-    pub fn show_subtitles(&self) -> bool {
-        self.read().show_subtitles
+    pub fn subtitles(&self) -> bool {
+        self.read().subtitles
     }
 
     /// Returns the [`SubtitleFontDescription`] of the media.
