@@ -3,7 +3,10 @@ use iced::{
     widget::{Button, Column, Container, Row, Slider, Text},
     Element, Font, Task,
 };
-use iced_video_player::{Icon, Video, VideoPlayer};
+use iced_video_player::{
+    overlay::{Icon, VideoOverlay},
+    Video, VideoPlayer,
+};
 use std::time::Duration;
 
 fn main() -> iced::Result {
@@ -41,7 +44,7 @@ impl App {
                 std::path::PathBuf::from(file!())
                     .parent()
                     .unwrap()
-                    .join("../assets/test.mp4")
+                    .join("../assets/test2.mp4")
                     .canonicalize()
                     .unwrap(),
             )
@@ -104,6 +107,7 @@ impl App {
             code_point,
             color: None,
             size: Some(40.0.into()),
+            message: Some(Message::TogglePause),
         };
 
         Column::new()
@@ -111,8 +115,10 @@ impl App {
                 Container::new(
                     VideoPlayer::new(&self.video)
                         .width(iced::Length::Fill)
-                        .height(iced::Length::Fill)
-                        .play_icon(icon, Message::TogglePause)
+                        .height(iced::Length::Fill) // .play_icon(icon, Message::TogglePause)
+                        .overlay(Box::new(move |video, bounds| {
+                            Some(VideoOverlay::new(video, bounds).play_icon(icon.clone()))
+                        }))
                         .content_fit(iced::ContentFit::Contain)
                         .on_end_of_stream(Message::EndOfStream)
                         .on_new_frame(Message::NewFrame),

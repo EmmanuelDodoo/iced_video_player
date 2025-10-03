@@ -1,6 +1,3 @@
-use std::time::Instant;
-
-use crate::{video_player::State, Icon, Update, VideoPlayer};
 use iced::{
     advanced::{
         self,
@@ -13,50 +10,128 @@ use iced::{
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 
+use crate::Video;
+
 const SPEED_SIZE_MULT: f32 = 0.75;
 
-pub struct VideoOverlay<'a, Message, Renderer = iced::Renderer>
+/// A default overlay. It does not draw anything.
+pub struct DefaultOverlay;
+
+impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer> for DefaultOverlay
+where
+    Renderer: advanced::Renderer,
+{
+    fn layout(&mut self, _renderer: &Renderer, _bounds: Size) -> layout::Node {
+        layout::Node::new(Size::ZERO)
+    }
+
+    fn draw(
+        &self,
+        _renderer: &mut Renderer,
+        _theme: &Theme,
+        _style: &advanced::renderer::Style,
+        _layout: layout::Layout<'_>,
+        _cursor: advanced::mouse::Cursor,
+    ) {
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+/// An icon for the overlay on the [`VideoOverlay`].
+pub struct Icon<Message, Font> {
+    /// The font that will be used to display the `code_point`.
+    pub font: Font,
+    /// The unicode code point that will be used as the icon.
+    pub code_point: char,
+    /// The font size of the content.
+    pub size: Option<Pixels>,
+    /// The font color of the content.
+    pub color: Option<Color>,
+    /// The message produced by the icon, if any.
+    pub message: Option<Message>,
+}
+
+/// An overlay for [`crate::VideoPlayer`].
+pub struct VideoOverlay<Message, Renderer = iced::Renderer>
 where
     Renderer: text::Renderer,
 {
-    state: &'a mut State,
-    timeout: u64,
     bounds: Rectangle,
     speed: f64,
-    play_pause: Option<(Icon<Renderer::Font>, Message)>,
-    fullscreen: Option<(Icon<Renderer::Font>, Message)>,
-    captions: Option<(Icon<Renderer::Font>, Message)>,
-    previous: Option<(Icon<Renderer::Font>, Message)>,
-    next: Option<(Icon<Renderer::Font>, Message)>,
+    /// The 'play/paused' icon used.
+    pub play: Option<Icon<Message, Renderer::Font>>,
+    /// The 'fullscreen' icon used.
+    pub fullscreen: Option<Icon<Message, Renderer::Font>>,
+    /// The 'captions' icon used.
+    pub captions: Option<Icon<Message, Renderer::Font>>,
+    /// The 'previous' icon used.
+    pub previous: Option<Icon<Message, Renderer::Font>>,
+    /// The 'next' icon used.
+    pub next: Option<Icon<Message, Renderer::Font>>,
 }
 
-impl<'a, Message, Renderer> VideoOverlay<'a, Message, Renderer>
+impl<Message, Renderer> VideoOverlay<Message, Renderer>
 where
     Message: Clone,
     Renderer: PrimitiveRenderer + text::Renderer,
 {
-    pub fn new<Theme>(
-        state: &'a mut State,
-        player: &VideoPlayer<'_, Message, Theme, Renderer>,
-        bounds: Rectangle,
-        speed: f64,
-    ) -> Self {
+    /// Creates a new [`VideoOverlay`] with the given video and bounds
+    pub fn new(video: &Video, bounds: Rectangle) -> Self {
         Self {
-            state,
             bounds,
-            speed,
-            timeout: player.overlay_timeout,
-            play_pause: player.play_pause.clone(),
-            fullscreen: player.fullscreen.clone(),
-            captions: player.captions.clone(),
-            previous: player.previous.clone(),
-            next: player.next.clone(),
+            speed: video.speed(),
+            play: None,
+            fullscreen: None,
+            captions: None,
+            previous: None,
+            next: None,
+        }
+    }
+
+    /// Sets the [`Icon`] used for the play/pause/restart
+    /// overlay.
+    pub fn play_icon(self, icon: Icon<Message, Renderer::Font>) -> Self {
+        Self {
+            play: Some(icon),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for the next overlay.
+    pub fn next_icon(self, icon: Icon<Message, Renderer::Font>) -> Self {
+        Self {
+            next: Some(icon),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for the previous overlay.
+    pub fn previous_icon(self, icon: Icon<Message, Renderer::Font>) -> Self {
+        Self {
+            previous: Some(icon),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for the fullscreen overlay.
+    pub fn fullscreen_icon(self, icon: Icon<Message, Renderer::Font>) -> Self {
+        Self {
+            fullscreen: Some(icon),
+            ..self
+        }
+    }
+
+    /// Sets the [`Icon`] used for the captions overlay.
+    pub fn subtitles_icon(self, icon: Icon<Message, Renderer::Font>) -> Self {
+        Self {
+            captions: Some(icon),
+            ..self
         }
     }
 }
 
-impl<'a, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
-    for VideoOverlay<'a, Message, Renderer>
+impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
+    for VideoOverlay<Message, Renderer>
 where
     Message: Clone,
     Renderer: advanced::Renderer + text::Renderer,
@@ -69,7 +144,7 @@ where
         let bounds_position = Point::ORIGIN;
         let mut paragraph: Plain<Renderer::Paragraph> = Plain::default();
 
-        let mut min_bounds = |icon: &Icon<Renderer::Font>| {
+        let mut min_bounds = |icon: &Icon<Message, Renderer::Font>| {
             let size = icon.size.unwrap_or_else(|| renderer.default_size());
             let line_height = text::LineHeight::Relative(1.0);
             let height = line_height.to_absolute(size);
@@ -92,9 +167,9 @@ where
             paragraph.min_bounds()
         };
 
-        let play = match &self.play_pause {
+        let play = match &self.play {
             None => Node::default(),
-            Some((icon, _)) => {
+            Some(icon) => {
                 let min_bounds = min_bounds(icon);
 
                 let x = bounds_position.x + (bounds_size.width * 0.5) - (min_bounds.width * 0.5);
@@ -106,7 +181,7 @@ where
 
         let previous = match &self.previous {
             None => Node::default(),
-            Some((icon, _)) => {
+            Some(icon) => {
                 let play = play.size();
                 let min_bounds = min_bounds(icon);
                 let (_, hor) = padding(min_bounds, icon.size.unwrap_or(renderer.default_size()));
@@ -123,7 +198,7 @@ where
 
         let next = match &self.next {
             None => Node::default(),
-            Some((icon, _)) => {
+            Some(icon) => {
                 let min_bounds = min_bounds(icon);
                 let (_, hor) = padding(min_bounds, icon.size.unwrap_or(renderer.default_size()));
                 let play = play.size().width * 0.5;
@@ -141,7 +216,7 @@ where
 
         let fullscreen = match &self.fullscreen {
             None => Node::default(),
-            Some((icon, _)) => {
+            Some(icon) => {
                 let min_bounds = min_bounds(icon);
                 let x =
                     bounds_position.x + bounds_size.width - horizontal_padding - min_bounds.width;
@@ -154,7 +229,7 @@ where
 
         let captions = match &self.captions {
             None => Node::default(),
-            Some((icon, _)) => {
+            Some(icon) => {
                 let min_bounds = min_bounds(icon);
                 let x =
                     bounds_position.x + bounds_size.width - horizontal_padding - min_bounds.width;
@@ -206,7 +281,7 @@ where
         layout: layout::Layout<'_>,
         _cursor: advanced::mouse::Cursor,
     ) {
-        let no_overlay = self.play_pause.is_none()
+        let no_overlay = self.play.is_none()
             && self.previous.is_none()
             && self.next.is_none()
             && self.fullscreen.is_none()
@@ -256,40 +331,41 @@ where
         );
         renderer.fill_text(text, speed.position(), text_color, clip_bounds);
 
-        let draw = |renderer: &mut Renderer, icon: &Icon<Renderer::Font>, bounds: Rectangle| {
-            let color = icon.color.unwrap_or(style.text_color);
-            let color = Color { a: alpha, ..color };
+        let draw =
+            |renderer: &mut Renderer, icon: &Icon<Message, Renderer::Font>, bounds: Rectangle| {
+                let color = icon.color.unwrap_or(style.text_color);
+                let color = Color { a: alpha, ..color };
 
-            let size = icon.size.unwrap_or_else(|| renderer.default_size());
-            let line_height = text::LineHeight::Relative(1.0);
+                let size = icon.size.unwrap_or_else(|| renderer.default_size());
+                let line_height = text::LineHeight::Relative(1.0);
 
-            let mut content = [0; 4];
-            let content = icon.code_point.encode_utf8(&mut content) as &str;
-            let content = content.to_string();
+                let mut content = [0; 4];
+                let content = icon.code_point.encode_utf8(&mut content) as &str;
+                let content = content.to_string();
 
-            let icon_text = Text {
-                content,
-                font: icon.font,
-                size,
-                bounds: bounds.size(),
-                line_height,
-                wrapping: text::Wrapping::default(),
-                shaping: text::Shaping::Advanced,
-                align_x: text::Alignment::Center,
-                align_y: alignment::Vertical::Center,
+                let icon_text = Text {
+                    content,
+                    font: icon.font,
+                    size,
+                    bounds: bounds.size(),
+                    line_height,
+                    wrapping: text::Wrapping::default(),
+                    shaping: text::Shaping::Advanced,
+                    align_x: text::Alignment::Center,
+                    align_y: alignment::Vertical::Center,
+                };
+
+                renderer.fill_text(icon_text, bounds.center(), color, clip_bounds);
             };
-
-            renderer.fill_text(icon_text, bounds.center(), color, clip_bounds);
-        };
 
         let border = Border::default().rounded(50.0);
         let background_color = overlay_color.scale_alpha(0.5);
 
-        match &self.play_pause {
+        match &self.play {
             None => {
                 let _ = children.next();
             }
-            Some((icon, _)) => {
+            Some(icon) => {
                 let layout = children.next().expect("Missing play layout");
                 let bounds = layout.bounds();
                 let (ver, hor) =
@@ -314,7 +390,7 @@ where
             None => {
                 let _ = children.next();
             }
-            Some((icon, _)) => {
+            Some(icon) => {
                 let layout = children.next().expect("Missing previous layout");
                 let bounds = layout.bounds();
                 let (ver, hor) =
@@ -339,7 +415,7 @@ where
             None => {
                 let _ = children.next();
             }
-            Some((icon, _)) => {
+            Some(icon) => {
                 let layout = children.next().expect("Missing next layout");
                 let bounds = layout.bounds();
                 let (ver, hor) =
@@ -364,7 +440,7 @@ where
             None => {
                 let _ = children.next();
             }
-            Some((icon, _)) => {
+            Some(icon) => {
                 let layout = children.next().expect("Missing fullscreen layout");
                 let bounds = layout.bounds();
                 draw(renderer, icon, bounds);
@@ -375,7 +451,7 @@ where
             None => {
                 let _ = children.next();
             }
-            Some((icon, _)) => {
+            Some(icon) => {
                 let layout = children.next().expect("Missing captions layout");
                 let bounds = layout.bounds();
                 draw(renderer, icon, bounds);
@@ -392,140 +468,68 @@ where
         _clipboard: &mut dyn advanced::Clipboard,
         shell: &mut advanced::Shell<'_, Message>,
     ) {
-        match event {
-            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
-                let mut children = layout.children();
-                let _speed = children.next();
+        if matches!(
+            event,
+            Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left))
+        ) {
+            let mut children = layout.children();
+            let _speed = children.next();
 
-                let play = children.next().expect("Update: Missing play layout");
-                if cursor.is_over(play.bounds()) {
-                    self.state.last_update = Some(Update {
-                        time: Instant::now(),
-                        parent: None,
-                        overlay: cursor.position_over(play.bounds()),
-                    });
-                    if let Some((_, message)) = &self.play_pause {
-                        shell.publish(message.clone());
-                        shell.capture_event();
-                        return;
-                    }
-                }
-
-                let previous = children.next().expect("Update: Missing previous layout");
-                if cursor.is_over(previous.bounds()) {
-                    self.state.last_update = Some(Update {
-                        time: Instant::now(),
-                        parent: None,
-                        overlay: cursor.position_over(previous.bounds()),
-                    });
-                    if let Some((_, message)) = &self.previous {
-                        shell.publish(message.clone());
-                        shell.capture_event();
-                        return;
-                    }
-                }
-
-                let next = children.next().expect("Update: Missing next layout");
-                if cursor.is_over(next.bounds()) {
-                    self.state.last_update = Some(Update {
-                        time: Instant::now(),
-                        parent: None,
-                        overlay: cursor.position_over(next.bounds()),
-                    });
-                    if let Some((_, message)) = &self.next {
-                        shell.publish(message.clone());
-                        shell.capture_event();
-                        return;
-                    }
-                }
-
-                let fullscreen = children.next().expect("Update: Missing fullscreen layout");
-                if cursor.is_over(fullscreen.bounds()) {
-                    self.state.last_update = Some(Update {
-                        time: Instant::now(),
-                        parent: None,
-                        overlay: cursor.position_over(fullscreen.bounds()),
-                    });
-                    if let Some((_, message)) = &self.fullscreen {
-                        shell.publish(message.clone());
-                        shell.capture_event();
-                        return;
-                    }
-                }
-
-                let captions = children.next().expect("Update: Missing captions layout");
-                if cursor.is_over(captions.bounds()) {
-                    self.state.last_update = Some(Update {
-                        time: Instant::now(),
-                        parent: None,
-                        overlay: cursor.position_over(captions.bounds()),
-                    });
-                    if let Some((_, message)) = &self.captions {
-                        shell.publish(message.clone());
-                        shell.capture_event();
-                    }
+            let play = children.next().expect("Update: Missing play layout");
+            if cursor.is_over(play.bounds()) {
+                if let Some(message) = self.play.as_ref().and_then(|icon| icon.message.as_ref()) {
+                    shell.publish(message.clone());
+                    shell.capture_event();
+                    return;
                 }
             }
-            Event::Mouse(mouse::Event::CursorEntered)
-            | Event::Mouse(mouse::Event::CursorLeft)
-            | Event::Mouse(mouse::Event::CursorMoved { .. }) => {
-                self.state.last_update = match self.state.last_update {
-                    Some(Update { time, parent, .. }) => Some(Update {
-                        time,
-                        parent,
-                        overlay: cursor.position_over(layout.bounds()),
-                    }),
-                    None => {
-                        if cursor.is_over(layout.bounds()) {
-                            Some(Update {
-                                time: Instant::now(),
-                                parent: None,
-                                overlay: cursor.position_over(layout.bounds()),
-                            })
-                        } else {
-                            None
-                        }
-                    }
-                };
-            }
-            Event::Window(iced::window::Event::RedrawRequested(_)) => {
-                match self.state.last_update.take() {
-                    Some(Update {
-                        parent: position,
-                        time,
-                        overlay,
-                    }) if overlay.is_some() => {
-                        if cursor.position_over(layout.bounds()) == overlay
-                            && Instant::now().duration_since(time).as_secs() >= self.timeout
-                        {
-                        } else {
-                            self.state.last_update = Some(Update {
-                                time,
-                                parent: position,
-                                overlay,
-                            })
-                        }
-                    }
-                    Some(Update {
-                        parent: None,
-                        overlay: None,
-                        ..
-                    }) => {}
-                    Some(Update {
-                        overlay,
-                        parent,
-                        time,
-                    }) if parent.is_some() => {
-                        self.state.last_update = Some(Update {
-                            time,
-                            parent,
-                            overlay,
-                        });
-                    }
-                    _ => {}
+
+            let previous = children.next().expect("Update: Missing previous layout");
+            if cursor.is_over(previous.bounds()) {
+                if let Some(message) = self
+                    .previous
+                    .as_ref()
+                    .and_then(|icon| icon.message.as_ref())
+                {
+                    shell.publish(message.clone());
+                    shell.capture_event();
+                    return;
                 }
             }
-            _ => {}
+
+            let next = children.next().expect("Update: Missing next layout");
+            if cursor.is_over(next.bounds()) {
+                if let Some(message) = self.next.as_ref().and_then(|icon| icon.message.as_ref()) {
+                    shell.publish(message.clone());
+                    shell.capture_event();
+                    return;
+                }
+            }
+
+            let fullscreen = children.next().expect("Update: Missing fullscreen layout");
+            if cursor.is_over(fullscreen.bounds()) {
+                if let Some(message) = self
+                    .fullscreen
+                    .as_ref()
+                    .and_then(|icon| icon.message.as_ref())
+                {
+                    shell.publish(message.clone());
+                    shell.capture_event();
+                    return;
+                }
+            }
+
+            let captions = children.next().expect("Update: Missing captions layout");
+            if cursor.is_over(captions.bounds()) {
+                if let Some(message) = self
+                    .captions
+                    .as_ref()
+                    .and_then(|icon| icon.message.as_ref())
+                {
+                    shell.publish(message.clone());
+                    shell.capture_event();
+                }
+            }
         }
     }
 

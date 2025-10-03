@@ -1,8 +1,11 @@
-use crate::{overlay::VideoOverlay, pipeline::VideoPrimitive, video::Video};
+#![allow(clippy::type_complexity)]
+use crate::{overlay::DefaultOverlay, pipeline::VideoPrimitive, video::Video};
+pub use glib;
 use gstreamer as gst;
 pub use iced::advanced::mouse::{click::Kind, Button};
 #[allow(unused_imports)]
 pub use iced::keyboard::{key, Key, Modifiers};
+pub use iced::Rectangle;
 use iced::{
     advanced::{
         self, layout, mouse, overlay,
@@ -10,7 +13,7 @@ use iced::{
         widget::{self, tree},
         Widget,
     },
-    keyboard, window, Color, Element, Event, Pixels, Point, Vector,
+    keyboard, window, Element, Event, Point, Vector,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use log::error;
@@ -20,23 +23,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Debug, Clone, Copy)]
-/// An icon for the overlay on the [`VideoPlayer`].
-pub struct Icon<Font> {
-    /// The font that will be used to display the `code_point`.
-    pub font: Font,
-    /// The unicode code point that will be used as the icon.
-    pub code_point: char,
-    /// The font size of the content.
-    pub size: Option<Pixels>,
-    // The font color of the content.
-    pub color: Option<Color>,
-}
-
 /// Video player widget which displays the current frame of a [`Video`](crate::Video).
-pub struct VideoPlayer<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
+pub struct VideoPlayer<'a, T, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
-    Renderer: PrimitiveRenderer + text::Renderer,
+    Renderer: PrimitiveRenderer,
+    T: overlay::Overlay<Message, Theme, Renderer>,
 {
     video: &'a Video,
     content_fit: iced::ContentFit,
@@ -46,20 +37,16 @@ where
     on_new_frame: Option<Message>,
     on_error: Option<Box<dyn Fn(&glib::Error) -> Message + 'a>>,
     enable_overlay: bool,
-    pub(crate) overlay_timeout: u64,
-    pub(crate) play_pause: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) fullscreen: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) captions: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) previous: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) next: Option<(Icon<Renderer::Font>, Message)>,
+    overlay: Box<dyn Fn(&Video, Rectangle) -> Option<T>>,
+    overlay_timeout: u64,
     on_keypress: Option<Box<dyn Fn(KeyPress) -> Message + 'a>>,
     on_click: Option<Box<dyn Fn(MouseClick) -> Message + 'a>>,
-    _phantom: PhantomData<Theme>,
+    _phantom: PhantomData<(Theme, Renderer)>,
 }
 
-impl<'a, Message, Theme, Renderer> VideoPlayer<'a, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> VideoPlayer<'a, DefaultOverlay, Message, Theme, Renderer>
 where
-    Renderer: PrimitiveRenderer + text::Renderer,
+    Renderer: PrimitiveRenderer,
 {
     /// Creates a new video player widget for a given video.
     pub fn new(video: &'a Video) -> Self {
@@ -71,19 +58,21 @@ where
             on_end_of_stream: None,
             on_new_frame: None,
             enable_overlay: true,
+            overlay: Box::new(|_, _| None),
             overlay_timeout: 3,
             on_error: None,
-            play_pause: None,
-            fullscreen: None,
-            captions: None,
-            next: None,
-            previous: None,
             on_keypress: None,
             on_click: None,
             _phantom: Default::default(),
         }
     }
+}
 
+impl<'a, T, Message, Theme, Renderer> VideoPlayer<'a, T, Message, Theme, Renderer>
+where
+    Renderer: PrimitiveRenderer + text::Renderer,
+    T: overlay::Overlay<Message, Theme, Renderer>,
+{
     /// Sets the width of the `VideoPlayer` boundaries.
     pub fn width(self, width: impl Into<iced::Length>) -> Self {
         VideoPlayer {
@@ -108,52 +97,52 @@ where
         }
     }
 
-    /// Sets the [`Icon`] used for, and the `Message` produced by the play/pause/restart
-    /// overlay.
-    pub fn play_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            play_pause: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Messaged` produced by the next overlay.
-    pub fn next_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            next: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Messaged` produced by the previous overlay.
-    pub fn previous_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            previous: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Messaged` produced by the fullscreen overlay.
-    pub fn fullscreen_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            fullscreen: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Messaged` produced by the captions overlay.
-    pub fn subtitles_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            captions: Some((icon, message)),
-            ..self
-        }
-    }
-
     /// Sets whether the overlay is enabled for video playback.
     pub fn enable_overlay(self, enable: bool) -> Self {
         VideoPlayer {
             enable_overlay: enable,
             ..self
+        }
+    }
+
+    /// Sets the function to call for producing the video overlay.
+    pub fn overlay<O>(
+        self,
+        overlay: Box<dyn Fn(&Video, Rectangle) -> Option<O>>,
+    ) -> VideoPlayer<'a, O, Message, Theme, Renderer>
+    where
+        O: overlay::Overlay<Message, Theme, Renderer>,
+    {
+        let VideoPlayer {
+            video,
+            content_fit,
+            width,
+            height,
+            on_end_of_stream,
+            on_new_frame,
+            on_error,
+            enable_overlay,
+            overlay: _old,
+            overlay_timeout,
+            on_keypress,
+            on_click,
+            _phantom,
+        } = self;
+
+        VideoPlayer {
+            overlay,
+            video,
+            content_fit,
+            width,
+            height,
+            on_end_of_stream,
+            on_new_frame,
+            on_error,
+            enable_overlay,
+            overlay_timeout,
+            on_keypress,
+            on_click,
+            _phantom,
         }
     }
 
@@ -215,11 +204,12 @@ where
     }
 }
 
-impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for VideoPlayer<'_, Message, Theme, Renderer>
+impl<T, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for VideoPlayer<'_, T, Message, Theme, Renderer>
 where
     Message: Clone,
     Renderer: PrimitiveRenderer + text::Renderer,
+    T: overlay::Overlay<Message, Theme, Renderer>,
 {
     fn size(&self) -> iced::Size<iced::Length> {
         iced::Size {
@@ -541,29 +531,36 @@ where
 
         let bounds = iced::Rectangle::new(position, final_size);
 
-        let speed = self.video.speed();
+        let overlay = (self.overlay)(self.video, bounds)?;
 
-        let overlay = VideoOverlay::new(state, self, bounds, speed);
+        let overlay = Overlay {
+            base: overlay,
+            state,
+            timeout: self.overlay_timeout,
+            _phantom: PhantomData,
+        };
+
         Some(overlay::Element::new(Box::new(overlay)))
     }
 }
 
-impl<'a, Message, Theme, Renderer> From<VideoPlayer<'a, Message, Theme, Renderer>>
+impl<'a, T, Message, Theme, Renderer> From<VideoPlayer<'a, T, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a + Clone,
     Theme: 'a,
     Renderer: 'a + PrimitiveRenderer + text::Renderer,
+    T: 'a + overlay::Overlay<Message, Theme, Renderer>,
 {
-    fn from(video_player: VideoPlayer<'a, Message, Theme, Renderer>) -> Self {
+    fn from(video_player: VideoPlayer<'a, T, Message, Theme, Renderer>) -> Self {
         Self::new(video_player)
     }
 }
 
-pub(crate) struct State {
+struct State {
     last_click: Option<mouse::Click>,
     modifiers: keyboard::Modifiers,
-    pub(crate) last_update: Option<Update>,
+    last_update: Option<Update>,
 }
 
 impl State {
@@ -577,10 +574,157 @@ impl State {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Update {
-    pub time: Instant,
-    pub parent: Option<Point>,
-    pub overlay: Option<Point>,
+struct Update {
+    time: Instant,
+    parent: Option<Point>,
+    overlay: Option<Point>,
+}
+
+struct Overlay<'a, T, Message, Theme, Renderer>
+where
+    Renderer: iced::advanced::Renderer,
+    T: overlay::Overlay<Message, Theme, Renderer>,
+{
+    base: T,
+    timeout: u64,
+    state: &'a mut State,
+    _phantom: PhantomData<(Message, Theme, Renderer)>,
+}
+
+impl<'a, T, Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
+    for Overlay<'a, T, Message, Theme, Renderer>
+where
+    Renderer: advanced::Renderer,
+    T: overlay::Overlay<Message, Theme, Renderer>,
+{
+    fn layout(&mut self, renderer: &Renderer, bounds: iced::Size) -> layout::Node {
+        self.base.layout(renderer, bounds)
+    }
+
+    fn draw(
+        &self,
+        renderer: &mut Renderer,
+        theme: &Theme,
+        style: &advanced::renderer::Style,
+        layout: layout::Layout<'_>,
+        cursor: mouse::Cursor,
+    ) {
+        self.base.draw(renderer, theme, style, layout, cursor)
+    }
+
+    fn update(
+        &mut self,
+        event: &Event,
+        layout: layout::Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+        clipboard: &mut dyn advanced::Clipboard,
+        shell: &mut advanced::Shell<'_, Message>,
+    ) {
+        self.base
+            .update(event, layout, cursor, renderer, clipboard, shell);
+
+        if shell.is_event_captured() {
+            self.state.last_update = Some(Update {
+                time: Instant::now(),
+                parent: None,
+                overlay: cursor.position_over(layout.bounds()),
+            });
+        }
+
+        match event {
+            Event::Mouse(mouse::Event::CursorEntered)
+            | Event::Mouse(mouse::Event::CursorLeft)
+            | Event::Mouse(mouse::Event::CursorMoved { .. }) => {
+                self.state.last_update = match self.state.last_update {
+                    Some(Update { time, parent, .. }) => Some(Update {
+                        time,
+                        parent,
+                        overlay: cursor.position_over(layout.bounds()),
+                    }),
+                    None => {
+                        if cursor.is_over(layout.bounds()) {
+                            Some(Update {
+                                time: Instant::now(),
+                                parent: None,
+                                overlay: cursor.position_over(layout.bounds()),
+                            })
+                        } else {
+                            None
+                        }
+                    }
+                };
+            }
+            Event::Window(iced::window::Event::RedrawRequested(_)) => {
+                match self.state.last_update.take() {
+                    Some(Update {
+                        parent: position,
+                        time,
+                        overlay,
+                    }) if overlay.is_some() => {
+                        if cursor.position_over(layout.bounds()) == overlay
+                            && Instant::now().duration_since(time).as_secs() >= self.timeout
+                        {
+                        } else {
+                            self.state.last_update = Some(Update {
+                                time,
+                                parent: position,
+                                overlay,
+                            })
+                        }
+                    }
+                    Some(Update {
+                        parent: None,
+                        overlay: None,
+                        ..
+                    }) => {}
+                    Some(Update {
+                        overlay,
+                        parent,
+                        time,
+                    }) if parent.is_some() => {
+                        self.state.last_update = Some(Update {
+                            time,
+                            parent,
+                            overlay,
+                        });
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn index(&self) -> f32 {
+        self.base.index()
+    }
+
+    fn operate(
+        &mut self,
+        layout: layout::Layout<'_>,
+        renderer: &Renderer,
+        operation: &mut dyn iced_wgpu::core::widget::Operation,
+    ) {
+        self.base.operate(layout, renderer, operation)
+    }
+
+    fn mouse_interaction(
+        &self,
+        layout: layout::Layout<'_>,
+        cursor: mouse::Cursor,
+        renderer: &Renderer,
+    ) -> mouse::Interaction {
+        self.base.mouse_interaction(layout, cursor, renderer)
+    }
+
+    fn overlay<'b>(
+        &'b mut self,
+        layout: layout::Layout<'b>,
+        renderer: &Renderer,
+    ) -> Option<overlay::Element<'b, Message, Theme, Renderer>> {
+        self.base.overlay(layout, renderer)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
