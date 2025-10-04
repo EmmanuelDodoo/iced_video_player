@@ -1,5 +1,9 @@
 #![allow(clippy::type_complexity)]
-use crate::{overlay::DefaultOverlay, pipeline::VideoPrimitive, video::Video};
+use crate::{
+    overlay::{NoOverlay, VideoOverlay},
+    pipeline::VideoPrimitive,
+    video::Video,
+};
 pub use glib;
 use gstreamer as gst;
 pub use iced::advanced::mouse::{click::Kind, Button};
@@ -9,7 +13,6 @@ pub use iced::Rectangle;
 use iced::{
     advanced::{
         self, layout, mouse, overlay,
-        text::{self},
         widget::{self, tree},
         Widget,
     },
@@ -24,10 +27,11 @@ use std::{
 };
 
 /// Video player widget which displays the current frame of a [`Video`](crate::Video).
-pub struct VideoPlayer<'a, T, Message, Theme = iced::Theme, Renderer = iced::Renderer>
+pub struct VideoPlayer<'a, T, Overlay, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
-    Renderer: PrimitiveRenderer,
-    T: overlay::Overlay<Message, Theme, Renderer>,
+    Overlay: overlay::Overlay<Message, Theme, Renderer>,
+    Renderer: PrimitiveRenderer + advanced::Renderer,
+    T: VideoOverlay<Overlay, Message, Theme, Renderer>,
 {
     video: &'a Video,
     content_fit: iced::ContentFit,
@@ -37,16 +41,16 @@ where
     on_new_frame: Option<Message>,
     on_error: Option<Box<dyn Fn(&glib::Error) -> Message + 'a>>,
     enable_overlay: bool,
-    overlay: Box<dyn Fn(&Video, Rectangle) -> Option<T>>,
+    overlay: T,
     overlay_timeout: u64,
     on_keypress: Option<Box<dyn Fn(KeyPress) -> Message + 'a>>,
     on_click: Option<Box<dyn Fn(MouseClick) -> Message + 'a>>,
-    _phantom: PhantomData<(Theme, Renderer)>,
+    _phantom: PhantomData<(Theme, Renderer, Overlay)>,
 }
 
-impl<'a, Message, Theme, Renderer> VideoPlayer<'a, DefaultOverlay, Message, Theme, Renderer>
+impl<'a, Message, Theme, Renderer> VideoPlayer<'a, (), NoOverlay, Message, Theme, Renderer>
 where
-    Renderer: PrimitiveRenderer,
+    Renderer: PrimitiveRenderer + advanced::Renderer,
 {
     /// Creates a new video player widget for a given video.
     pub fn new(video: &'a Video) -> Self {
@@ -58,7 +62,7 @@ where
             on_end_of_stream: None,
             on_new_frame: None,
             enable_overlay: true,
-            overlay: Box::new(|_, _| None),
+            overlay: (),
             overlay_timeout: 3,
             on_error: None,
             on_keypress: None,
@@ -68,10 +72,11 @@ where
     }
 }
 
-impl<'a, T, Message, Theme, Renderer> VideoPlayer<'a, T, Message, Theme, Renderer>
+impl<'a, T, Overlay, Message, Theme, Renderer> VideoPlayer<'a, T, Overlay, Message, Theme, Renderer>
 where
-    Renderer: PrimitiveRenderer + text::Renderer,
-    T: overlay::Overlay<Message, Theme, Renderer>,
+    Renderer: PrimitiveRenderer + advanced::Renderer,
+    T: VideoOverlay<Overlay, Message, Theme, Renderer>,
+    Overlay: overlay::Overlay<Message, Theme, Renderer>,
 {
     /// Sets the width of the `VideoPlayer` boundaries.
     pub fn width(self, width: impl Into<iced::Length>) -> Self {
@@ -105,14 +110,13 @@ where
         }
     }
 
-    /// Sets the function to call for producing the video overlay.
-    pub fn overlay<O>(
-        self,
-        overlay: Box<dyn Fn(&Video, Rectangle) -> Option<O>>,
-    ) -> VideoPlayer<'a, O, Message, Theme, Renderer>
+    /// Sets [`VideoOverlay`] of the player.
+    pub fn overlay<V, O>(self, overlay: V) -> VideoPlayer<'a, V, O, Message, Theme, Renderer>
     where
+        V: VideoOverlay<O, Message, Theme, Renderer>,
         O: overlay::Overlay<Message, Theme, Renderer>,
     {
+        // Changing any of the fields causes an alert via a comp error
         let VideoPlayer {
             video,
             content_fit,
@@ -126,7 +130,7 @@ where
             overlay_timeout,
             on_keypress,
             on_click,
-            _phantom,
+            _phantom: _unused,
         } = self;
 
         VideoPlayer {
@@ -142,7 +146,7 @@ where
             overlay_timeout,
             on_keypress,
             on_click,
-            _phantom,
+            _phantom: PhantomData,
         }
     }
 
@@ -204,12 +208,13 @@ where
     }
 }
 
-impl<T, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
-    for VideoPlayer<'_, T, Message, Theme, Renderer>
+impl<T, O, Message, Theme, Renderer> Widget<Message, Theme, Renderer>
+    for VideoPlayer<'_, T, O, Message, Theme, Renderer>
 where
     Message: Clone,
-    Renderer: PrimitiveRenderer + text::Renderer,
-    T: overlay::Overlay<Message, Theme, Renderer>,
+    O: overlay::Overlay<Message, Theme, Renderer>,
+    Renderer: PrimitiveRenderer + advanced::Renderer,
+    T: VideoOverlay<O, Message, Theme, Renderer>,
 {
     fn size(&self) -> iced::Size<iced::Length> {
         iced::Size {
@@ -531,7 +536,7 @@ where
 
         let bounds = iced::Rectangle::new(position, final_size);
 
-        let overlay = (self.overlay)(self.video, bounds)?;
+        let overlay = self.overlay.overlay(self.video, bounds)?;
 
         let overlay = Overlay {
             base: overlay,
@@ -544,15 +549,17 @@ where
     }
 }
 
-impl<'a, T, Message, Theme, Renderer> From<VideoPlayer<'a, T, Message, Theme, Renderer>>
+impl<'a, T, Overlay, Message, Theme, Renderer>
+    From<VideoPlayer<'a, T, Overlay, Message, Theme, Renderer>>
     for Element<'a, Message, Theme, Renderer>
 where
     Message: 'a + Clone,
     Theme: 'a,
-    Renderer: 'a + PrimitiveRenderer + text::Renderer,
-    T: 'a + overlay::Overlay<Message, Theme, Renderer>,
+    Renderer: 'a + PrimitiveRenderer + advanced::Renderer,
+    T: 'a + VideoOverlay<Overlay, Message, Theme, Renderer>,
+    Overlay: 'a + overlay::Overlay<Message, Theme, Renderer>,
 {
-    fn from(video_player: VideoPlayer<'a, T, Message, Theme, Renderer>) -> Self {
+    fn from(video_player: VideoPlayer<'a, T, Overlay, Message, Theme, Renderer>) -> Self {
         Self::new(video_player)
     }
 }

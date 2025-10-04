@@ -15,9 +15,9 @@ use crate::Video;
 const SPEED_SIZE_MULT: f32 = 0.75;
 
 /// A default overlay. It does not draw anything.
-pub struct DefaultOverlay;
+pub struct NoOverlay;
 
-impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer> for DefaultOverlay
+impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer> for NoOverlay
 where
     Renderer: advanced::Renderer,
 {
@@ -37,7 +37,7 @@ where
 }
 
 #[derive(Debug, Clone, Copy)]
-/// An icon for the overlay on the [`VideoOverlay`].
+/// An icon for the overlay on [`DefaultOverlay`].
 pub struct Icon<Message, Font> {
     /// The font that will be used to display the `code_point`.
     pub font: Font,
@@ -52,7 +52,7 @@ pub struct Icon<Message, Font> {
 }
 
 /// An overlay for [`crate::VideoPlayer`].
-pub struct VideoOverlay<Message, Renderer = iced::Renderer>
+pub struct DefaultOverlay<Message, Renderer = iced::Renderer>
 where
     Renderer: text::Renderer,
 {
@@ -70,12 +70,12 @@ where
     pub next: Option<Icon<Message, Renderer::Font>>,
 }
 
-impl<Message, Renderer> VideoOverlay<Message, Renderer>
+impl<Message, Renderer> DefaultOverlay<Message, Renderer>
 where
     Message: Clone,
     Renderer: PrimitiveRenderer + text::Renderer,
 {
-    /// Creates a new [`VideoOverlay`] with the given video and bounds
+    /// Creates a new [`DefaultOverlay`] with the given video and bounds
     pub fn new(video: &Video, bounds: Rectangle) -> Self {
         Self {
             bounds,
@@ -131,7 +131,7 @@ where
 }
 
 impl<Message, Theme, Renderer> overlay::Overlay<Message, Theme, Renderer>
-    for VideoOverlay<Message, Renderer>
+    for DefaultOverlay<Message, Renderer>
 where
     Message: Clone,
     Renderer: advanced::Renderer + text::Renderer,
@@ -562,4 +562,35 @@ fn padding(bounds: Size, size: Pixels) -> (f32, f32) {
     let ver = padding + (max - bounds.height) / 2.0;
 
     (ver, hor)
+}
+
+/// The Video Overlay producer of a [`crate::VideoPlayer`].
+pub trait VideoOverlay<Overlay, Message, Theme, Renderer>
+where
+    Renderer: advanced::Renderer,
+    Overlay: overlay::Overlay<Message, Theme, Renderer>,
+{
+    /// Returns an overlay, if any, given the video and the bounds.
+    fn overlay(&self, video: &Video, bounds: Rectangle) -> Option<Overlay>;
+}
+
+impl<T, Overlay, Message, Theme, Renderer, C> VideoOverlay<Overlay, Message, Theme, Renderer> for T
+where
+    Renderer: advanced::Renderer,
+    T: Fn(&Video, Rectangle) -> C,
+    C: Into<Option<Overlay>>,
+    Overlay: overlay::Overlay<Message, Theme, Renderer>,
+{
+    fn overlay(&self, video: &Video, bounds: Rectangle) -> Option<Overlay> {
+        self(video, bounds).into()
+    }
+}
+
+impl<Message, Theme, Renderer> VideoOverlay<NoOverlay, Message, Theme, Renderer> for ()
+where
+    Renderer: advanced::Renderer,
+{
+    fn overlay(&self, _video: &Video, _bounds: Rectangle) -> Option<NoOverlay> {
+        None
+    }
 }

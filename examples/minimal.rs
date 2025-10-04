@@ -4,7 +4,7 @@ use iced::{
     Element, Font, Task,
 };
 use iced_video_player::{
-    overlay::{Icon, VideoOverlay},
+    overlay::{DefaultOverlay, Icon},
     Video, VideoPlayer,
 };
 use std::time::Duration;
@@ -13,7 +13,7 @@ fn main() -> iced::Result {
     iced::application(App::boot, App::update, App::view).run()
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 enum Message {
     FontLoaded(Result<(), font::Error>),
     TogglePause,
@@ -115,10 +115,10 @@ impl App {
                 Container::new(
                     VideoPlayer::new(&self.video)
                         .width(iced::Length::Fill)
-                        .height(iced::Length::Fill) // .play_icon(icon, Message::TogglePause)
-                        .overlay(Box::new(move |video, bounds| {
-                            Some(VideoOverlay::new(video, bounds).play_icon(icon.clone()))
-                        }))
+                        .height(iced::Length::Fill)
+                        .overlay(move |video: &Video, bounds: iced::Rectangle| {
+                            DefaultOverlay::new(video, bounds).play_icon(icon)
+                        })
                         .content_fit(iced::ContentFit::Contain)
                         .on_end_of_stream(Message::EndOfStream)
                         .on_new_frame(Message::NewFrame),
