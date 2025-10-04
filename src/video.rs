@@ -129,6 +129,8 @@ pub(crate) struct Internal {
     pub(crate) subtitles: bool,
     pub(crate) subtitle_description: SubtitleFontDescription,
 
+    pub(crate) hard_volumne: bool,
+
     pub(crate) frame: Arc<Mutex<Frame>>,
     pub(crate) upload_frame: Arc<AtomicBool>,
     pub(crate) last_frame_time: Arc<Mutex<Instant>>,
@@ -261,6 +263,27 @@ impl Internal {
         self.subtitles = !self.subtitles;
     }
 
+    fn toggle_hardware_volume(&mut self) {
+        let pipeline = &self.source;
+
+        let flags = pipeline.property_value("flags");
+        let flags_class =
+            FlagsClass::with_type(flags.type_()).expect("Playbin pipeline should have flags");
+
+        let builder = flags_class.builder_with_value(flags).unwrap();
+
+        let flags = if self.hard_volumne {
+            builder.set_by_nick("soft-volume")
+        } else {
+            builder.unset_by_nick("soft-volume")
+        }
+        .build()
+        .unwrap();
+
+        pipeline.set_property_from_value("flags", &flags);
+        self.hard_volumne = !self.hard_volumne;
+    }
+
     fn set_subtitle_description(&mut self, description: SubtitleFontDescription) {
         let pipeline = &self.source;
 
@@ -270,6 +293,10 @@ impl Internal {
 
     fn set_text(&mut self, text: TextTag) {
         self.source.set_property("current-text", text.id);
+    }
+
+    fn set_audio(&mut self, audio: AudioTag) {
+        self.source.set_property("current-audio", audio.id);
     }
 }
 
@@ -490,6 +517,8 @@ impl Video {
             subtitles: show_subtitles,
             subtitle_description,
 
+            hard_volumne: false,
+
             frame,
             upload_frame,
             last_frame_time,
@@ -657,6 +686,16 @@ impl Video {
         self.read().source.property("volume")
     }
 
+    /// Toggles the use of hardware/software volume.
+    pub fn toggle_hardware_volume(&mut self) {
+        self.get_mut().toggle_hardware_volume()
+    }
+
+    /// Returns whether hardware volume is being used.
+    pub fn hardware_volume(&self) -> bool {
+        self.read().hard_volumne
+    }
+
     /// Set if the audio is muted or not, without changing the volume.
     pub fn set_muted(&mut self, muted: bool) {
         self.get_mut().source.set_property("mute", muted);
@@ -665,6 +704,28 @@ impl Video {
     /// Get if the audio is muted or not.
     pub fn muted(&self) -> bool {
         self.read().source.property("mute")
+    }
+
+    /// Gets the current audio of the media if any.
+    pub fn get_audio(&self) -> Option<AudioTag> {
+        let pipeline = &self.read().source;
+
+        let id = pipeline.property::<i32>("current-audio");
+
+        get_audio(pipeline, id)
+    }
+
+    /// Sets the audio playback the current media.
+    pub fn set_audio(&mut self, audio: AudioTag) {
+        self.get_mut().set_audio(audio)
+    }
+
+    /// Returns a list of available audio for the media.
+    pub fn available_audio(&self) -> Vec<AudioTag> {
+        let pipeline = &self.read().source;
+        let n = pipeline.property::<i32>("n-audio");
+
+        (0..n).filter_map(|id| get_audio(pipeline, id)).collect()
     }
 
     /// Get if the stream ended or not.
@@ -755,18 +816,7 @@ impl Video {
         let pipeline = &self.read().source;
         let n = pipeline.property::<i32>("n-text");
 
-        (0..n)
-            .filter_map(|id| {
-                let tags =
-                    pipeline.emit_by_name::<Option<gst::TagList>>("get-text-tags", &[&id])?;
-                let codec = tags.get::<gst::tags::LanguageCode>()?;
-
-                Some(TextTag {
-                    id,
-                    language_code: codec.get().to_owned(),
-                })
-            })
-            .collect()
+        (0..n).filter_map(|id| get_text(pipeline, id)).collect()
     }
 
     /// Sets the subtitle to be shown for the media.
@@ -780,13 +830,7 @@ impl Video {
 
         let id = pipeline.property::<i32>("current-text");
 
-        let tags = pipeline.emit_by_name::<Option<gst::TagList>>("get-text-tags", &[&id])?;
-        let codec = tags.get::<gst::tags::LanguageCode>()?;
-
-        Some(TextTag {
-            id,
-            language_code: codec.get().to_owned(),
-        })
+        get_text(pipeline, id)
     }
 
     /// Set the subtitle URL to display.
@@ -897,6 +941,47 @@ pub struct TextTag {
     id: i32,
     /// The language of the subtitle.
     pub language_code: String,
+    /// The title of the subtitle.
+    pub title: String,
+}
+
+#[derive(Debug, Clone)]
+/// Audio meta data.
+pub struct AudioTag {
+    id: i32,
+    /// The audio language.
+    pub language_code: String,
+    /// the audio codec
+    pub codec: String,
+    /// The audio title
+    pub title: String,
+}
+
+fn get_audio(pipeline: &gst::Pipeline, id: i32) -> Option<AudioTag> {
+    let tags = pipeline.emit_by_name::<Option<gst::TagList>>("get-audio-tags", &[&id])?;
+
+    let language = tags.get::<gst::tags::LanguageCode>()?;
+    let codec = tags.get::<gst::tags::AudioCodec>()?;
+    let title = tags.get::<gst::tags::Title>()?;
+
+    Some(AudioTag {
+        id,
+        language_code: language.get().to_owned(),
+        codec: codec.get().to_owned(),
+        title: title.get().to_owned(),
+    })
+}
+
+fn get_text(pipeline: &gst::Pipeline, id: i32) -> Option<TextTag> {
+    let tags = pipeline.emit_by_name::<Option<gst::TagList>>("get-text-tags", &[&id])?;
+    let codec = tags.get::<gst::tags::LanguageCode>()?;
+    let title = tags.get::<gst::tags::Title>()?;
+
+    Some(TextTag {
+        id,
+        language_code: codec.get().to_owned(),
+        title: title.get().to_owned(),
+    })
 }
 
 pub mod subtitles {
