@@ -52,6 +52,7 @@ where
     pub(crate) captions: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) previous: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) next: Option<(Icon<Renderer::Font>, Message)>,
+    pub(crate) speed_font: Option<Renderer::Font>,
     on_keypress: Option<Box<dyn Fn(KeyPress) -> Message + 'a>>,
     on_click: Option<Box<dyn Fn(MouseClick) -> Message + 'a>>,
     _phantom: PhantomData<Theme>,
@@ -77,6 +78,7 @@ where
             fullscreen: None,
             captions: None,
             next: None,
+            speed_font: None,
             previous: None,
             on_keypress: None,
             on_click: None,
@@ -137,6 +139,14 @@ where
     pub fn fullscreen_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
         VideoPlayer {
             fullscreen: Some((icon, message)),
+            ..self
+        }
+    }
+
+    /// Sets the font used for the video speed on the overlay
+    pub fn speed_font(self, font: Renderer::Font) -> Self {
+        VideoPlayer {
+            speed_font: Some(font),
             ..self
         }
     }

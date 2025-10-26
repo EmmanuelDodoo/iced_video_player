@@ -28,7 +28,7 @@ struct VideoEntry {
     render_index: AtomicUsize,
 }
 
-struct VideoPipeline {
+pub struct VideoPipeline {
     pipeline: wgpu::RenderPipeline,
     bg0_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -315,7 +315,7 @@ impl VideoPipeline {
         }
     }
 
-    fn prepare(&mut self, queue: &wgpu::Queue, video_id: u64, bounds: &iced::Rectangle) {
+    fn prepare(&mut self, queue: &wgpu::Queue, video_id: u64, bounds: &iced_wgpu::core::Rectangle) {
         if let Some(video) = self.videos.get_mut(&video_id) {
             let uniforms = Uniforms {
                 rect: [
@@ -348,7 +348,7 @@ impl VideoPipeline {
         &self,
         target: &wgpu::TextureView,
         encoder: &mut wgpu::CommandEncoder,
-        clip: &iced::Rectangle<u32>,
+        clip: &iced_wgpu::core::Rectangle<u32>,
         video_id: u64,
     ) {
         if let Some(video) = self.videos.get(&video_id) {
@@ -414,24 +414,28 @@ impl VideoPrimitive {
 }
 
 impl Primitive for VideoPrimitive {
-    fn prepare(
+    type Renderer = VideoPipeline;
+
+    fn initialize(
         &self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        _queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
-        storage: &mut iced_wgpu::primitive::Storage,
-        bounds: &iced::Rectangle,
-        viewport: &iced_wgpu::graphics::Viewport,
+    ) -> Self::Renderer {
+        VideoPipeline::new(device, format)
+    }
+
+    fn prepare(
+        &self,
+        renderer: &mut Self::Renderer,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        bounds: &iced_core::Rectangle,
+        viewport: &iced_graphics::Viewport,
     ) {
-        if !storage.has::<VideoPipeline>() {
-            storage.store(VideoPipeline::new(device, format));
-        }
-
-        let pipeline = storage.get_mut::<VideoPipeline>().unwrap();
-
         if self.upload_frame {
             if let Some(readable) = self.frame.lock().expect("lock frame mutex").readable() {
-                pipeline.upload(
+                renderer.upload(
                     device,
                     queue,
                     self.video_id,
@@ -442,25 +446,28 @@ impl Primitive for VideoPrimitive {
             }
         }
 
-        pipeline.prepare(
+        renderer.prepare(
             queue,
             self.video_id,
             &(*bounds
-                * iced::Transformation::orthographic(
+                * iced_core::Transformation::orthographic(
                     viewport.logical_size().width as _,
                     viewport.logical_size().height as _,
                 )),
         );
     }
 
+    fn draw(&self, _renderer: &Self::Renderer, _render_pass: &mut wgpu::RenderPass<'_>) -> bool {
+        false
+    }
+
     fn render(
         &self,
+        renderer: &Self::Renderer,
         encoder: &mut wgpu::CommandEncoder,
-        storage: &iced_wgpu::primitive::Storage,
         target: &wgpu::TextureView,
-        clip_bounds: &iced::Rectangle<u32>,
+        clip_bounds: &iced_wgpu::core::Rectangle<u32>,
     ) {
-        let pipeline = storage.get::<VideoPipeline>().unwrap();
-        pipeline.draw(target, encoder, clip_bounds, self.video_id);
+        renderer.draw(target, encoder, clip_bounds, self.video_id);
     }
 }

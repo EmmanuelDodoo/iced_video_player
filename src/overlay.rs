@@ -23,6 +23,7 @@ where
     timeout: u64,
     bounds: Rectangle,
     speed: f64,
+    speed_font: Option<Renderer::Font>,
     play_pause: Option<(Icon<Renderer::Font>, Message)>,
     fullscreen: Option<(Icon<Renderer::Font>, Message)>,
     captions: Option<(Icon<Renderer::Font>, Message)>,
@@ -45,6 +46,7 @@ where
             state,
             bounds,
             speed,
+            speed_font: player.speed_font,
             timeout: player.overlay_timeout,
             play_pause: player.play_pause.clone(),
             fullscreen: player.fullscreen.clone(),
@@ -169,7 +171,7 @@ where
             let line_height = text::LineHeight::default();
             let height = line_height.to_absolute(size);
             let content = format!("{:.02}", self.speed);
-            let font = <Renderer as text::Renderer>::MONOSPACE_FONT;
+            let font = self.speed_font.unwrap_or_else(|| renderer.default_font());
 
             let text = Text {
                 content: content.as_str(),
