@@ -1,6 +1,6 @@
 use crate::{overlay::VideoOverlay, pipeline::VideoPrimitive, video::Video};
 use gstreamer as gst;
-pub use iced::advanced::mouse::{click::Kind, Button};
+pub use iced::advanced::mouse::{click::Kind, Button, ScrollDelta};
 #[allow(unused_imports)]
 pub use iced::keyboard::{key, Key, Modifiers};
 use iced::{
@@ -53,8 +53,8 @@ where
     pub(crate) previous: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) next: Option<(Icon<Renderer::Font>, Message)>,
     pub(crate) speed_font: Option<Renderer::Font>,
-    on_keypress: Option<Box<dyn Fn(KeyPress) -> Message + 'a>>,
-    on_click: Option<Box<dyn Fn(MouseClick) -> Message + 'a>>,
+    on_keypress: Option<Box<dyn Fn(KeyPress) -> Option<Message> + 'a>>,
+    on_click: Option<Box<dyn Fn(MouseClick) -> Option<Message> + 'a>>,
     _phantom: PhantomData<Theme>,
 }
 
@@ -205,7 +205,7 @@ where
     /// Sets the message produced when a [`KeyPress`] is received.
     pub fn on_keypress<F>(self, on_keypress: F) -> Self
     where
-        F: 'a + Fn(KeyPress) -> Message,
+        F: 'a + Fn(KeyPress) -> Option<Message>,
     {
         VideoPlayer {
             on_keypress: Some(Box::new(on_keypress)),
@@ -216,7 +216,7 @@ where
     /// Sets the message produced when a [`MouseClick`] is received.
     pub fn on_click<F>(self, on_click: F) -> Self
     where
-        F: 'a + Fn(MouseClick) -> Message,
+        F: 'a + Fn(MouseClick) -> Option<Message>,
     {
         VideoPlayer {
             on_click: Some(Box::new(on_click)),
@@ -360,8 +360,10 @@ where
                         key: key.clone(),
                         modifiers: *modifiers,
                     };
-                    shell.publish((on_keypress)(keypress));
-                    shell.capture_event();
+                    if let Some(message) = (on_keypress)(keypress) {
+                        shell.publish(message);
+                        shell.capture_event();
+                    }
                 }
             }
             Event::Mouse(mouse::Event::ButtonPressed(button))
@@ -375,19 +377,48 @@ where
                 );
 
                 if let Some(on_click) = &self.on_click {
-                    let mouse_click = MouseClick {
+                    let action = MouseAction::Button {
                         button: *button,
-                        modifiers: state.modifiers,
                         kind: click.kind(),
                     };
-                    shell.publish((on_click)(mouse_click));
-                    shell.capture_event();
+                    let mouse_click = MouseClick {
+                        modifiers: state.modifiers,
+                        action,
+                    };
+                    if let Some(message) = (on_click)(mouse_click) {
+                        shell.publish(message);
+                        shell.capture_event();
+                    }
                 }
 
                 state.last_click = Some(click);
                 state.last_update = Some(Update {
                     time: Instant::now(),
                     parent: Some(click.position()),
+                    overlay: None,
+                })
+            }
+            Event::Mouse(mouse::Event::WheelScrolled { delta })
+                if cursor.is_over(layout.bounds()) =>
+            {
+                let state = state.state.downcast_mut::<State>();
+                if let Some(on_click) = &self.on_click {
+                    let action = MouseAction::Scroll(*delta);
+
+                    let mouse_click = MouseClick {
+                        modifiers: state.modifiers,
+                        action,
+                    };
+
+                    if let Some(message) = (on_click)(mouse_click) {
+                        shell.publish(message);
+                        shell.capture_event();
+                    }
+                }
+
+                state.last_update = Some(Update {
+                    time: Instant::now(),
+                    parent: cursor.position_over(layout.bounds()),
                     overlay: None,
                 })
             }
@@ -617,12 +648,21 @@ pub(crate) struct Update {
 #[derive(Debug, Clone, Copy, PartialEq)]
 /// A mouse click.
 pub struct MouseClick {
-    /// The mouse button clicked.
-    pub button: Button,
-    // The state of keyboard modifiers.
+    /// The state of keyboard modifiers.
     pub modifiers: Modifiers,
-    /// The kind of mouse click.
-    pub kind: Kind,
+    /// A mouse action
+    pub action: MouseAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum MouseAction {
+    Button {
+        /// The mouse button clicked.
+        button: Button,
+        /// The kind of mouse click.
+        kind: Kind,
+    },
+    Scroll(ScrollDelta),
 }
 
 #[derive(Debug, Clone, PartialEq)]
