@@ -514,6 +514,27 @@ where
         }
     }
 
+    fn mouse_interaction(
+        &self,
+        state: &tree::Tree,
+        layout: layout::Layout<'_>,
+        cursor: mouse::Cursor,
+        _viewport: &iced::Rectangle,
+        _renderer: &Renderer,
+    ) -> mouse::Interaction {
+        if !cursor.is_over(layout.bounds()) {
+            return mouse::Interaction::default();
+        }
+
+        let state = state.state.downcast_ref::<State>();
+
+        if state.last_update.is_some() {
+            mouse::Interaction::default()
+        } else {
+            mouse::Interaction::Hidden
+        }
+    }
+
     fn overlay<'a>(
         &'a mut self,
         state: &'a mut widget::Tree,
