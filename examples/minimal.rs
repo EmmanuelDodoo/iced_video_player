@@ -1,9 +1,9 @@
 use iced::{
     font,
     widget::{Button, Column, Container, Row, Slider, Text},
-    Element, Font, Task,
+    Element, Task,
 };
-use iced_video_player::{Icon, Video, VideoPlayer};
+use iced_video_player::{Video, VideoPlayer};
 use std::time::Duration;
 
 fn main() -> iced::Result {
@@ -19,12 +19,14 @@ enum Message {
     SeekRelease,
     EndOfStream,
     NewFrame,
+    None,
 }
 
 struct App {
     video: Video,
     position: f64,
     dragging: bool,
+    fullscreen: bool,
 }
 
 impl App {
@@ -54,11 +56,13 @@ impl App {
             video,
             position: 0.0,
             dragging: false,
+            fullscreen: false,
         }
     }
 
-    fn update(&mut self, message: Message) {
+    fn update(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::None => {}
             Message::FontLoaded(Err(error)) => {
                 eprintln!("Couldn't load font: \n{error:?}");
             }
@@ -67,7 +71,21 @@ impl App {
                 self.video.set_paused(!self.video.paused());
             }
             Message::ToggleLoop => {
-                self.video.set_looping(!self.video.looping());
+                // self.video.set_looping(!self.video.looping());
+                self.fullscreen = !self.fullscreen;
+                let fullscreen = self.fullscreen;
+                return iced::window::latest()
+                    .and_then(move |id| {
+                        iced::window::set_mode::<()>(
+                            id,
+                            if fullscreen {
+                                iced::window::Mode::Fullscreen
+                            } else {
+                                iced::window::Mode::Windowed
+                            },
+                        )
+                    })
+                    .map(|_| Message::None);
             }
             Message::Seek(secs) => {
                 self.dragging = true;
@@ -90,29 +108,17 @@ impl App {
                 }
             }
         }
+
+        Task::none()
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let code_point = if self.video.eos() || self.video.paused() {
-            '\u{E800}'
-        } else {
-            '\u{E801}'
-        };
-
-        let icon = Icon {
-            font: Font::with_name("minimal"),
-            code_point,
-            color: None,
-            size: Some(40.0.into()),
-        };
-
         Column::new()
             .push(
                 Container::new(
                     VideoPlayer::new(&self.video)
                         .width(iced::Length::Fill)
                         .height(iced::Length::Fill)
-                        .play_icon(icon, Message::TogglePause)
                         .content_fit(iced::ContentFit::Contain)
                         .on_end_of_stream(Message::EndOfStream)
                         .on_new_frame(Message::NewFrame),

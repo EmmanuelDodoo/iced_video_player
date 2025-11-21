@@ -1,16 +1,15 @@
-use crate::{overlay::VideoOverlay, pipeline::VideoPrimitive, video::Video};
+use crate::{pipeline::VideoPrimitive, video::Video};
 use gstreamer as gst;
 pub use iced::advanced::mouse::{click::Kind, Button, ScrollDelta};
 #[allow(unused_imports)]
 pub use iced::keyboard::{key, Key, Modifiers};
 use iced::{
     advanced::{
-        self, layout, mouse, overlay,
-        text::{self},
+        self, layout, mouse,
         widget::{self, tree},
         Widget,
     },
-    keyboard, window, Color, Element, Event, Pixels, Point, Vector,
+    keyboard, window, Element, Event, Point,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use log::error;
@@ -20,23 +19,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[derive(Debug, Clone, Copy)]
-/// An icon for the overlay on the [`VideoPlayer`].
-pub struct Icon<Font> {
-    /// The font that will be used to display the `code_point`.
-    pub font: Font,
-    /// The unicode code point that will be used as the icon.
-    pub code_point: char,
-    /// The font size of the content.
-    pub size: Option<Pixels>,
-    // The font color of the content.
-    pub color: Option<Color>,
-}
-
 /// Video player widget which displays the current frame of a [`Video`](crate::Video).
 pub struct VideoPlayer<'a, Message, Theme = iced::Theme, Renderer = iced::Renderer>
 where
-    Renderer: PrimitiveRenderer + text::Renderer,
+    Renderer: PrimitiveRenderer,
 {
     video: &'a Video,
     content_fit: iced::ContentFit,
@@ -45,22 +31,14 @@ where
     on_end_of_stream: Option<Message>,
     on_new_frame: Option<Message>,
     on_error: Option<Box<dyn Fn(&glib::Error) -> Message + 'a>>,
-    enable_overlay: bool,
-    pub(crate) overlay_timeout: u64,
-    pub(crate) play_pause: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) fullscreen: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) captions: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) previous: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) next: Option<(Icon<Renderer::Font>, Message)>,
-    pub(crate) speed_font: Option<Renderer::Font>,
     on_keypress: Option<Box<dyn Fn(KeyPress) -> Option<Message> + 'a>>,
     on_click: Option<Box<dyn Fn(MouseClick) -> Option<Message> + 'a>>,
-    _phantom: PhantomData<Theme>,
+    _phantom: PhantomData<(Theme, Renderer)>,
 }
 
 impl<'a, Message, Theme, Renderer> VideoPlayer<'a, Message, Theme, Renderer>
 where
-    Renderer: PrimitiveRenderer + text::Renderer,
+    Renderer: PrimitiveRenderer,
 {
     /// Creates a new video player widget for a given video.
     pub fn new(video: &'a Video) -> Self {
@@ -71,15 +49,7 @@ where
             height: iced::Length::Shrink,
             on_end_of_stream: None,
             on_new_frame: None,
-            enable_overlay: true,
-            overlay_timeout: 3,
             on_error: None,
-            play_pause: None,
-            fullscreen: None,
-            captions: None,
-            next: None,
-            speed_font: None,
-            previous: None,
             on_keypress: None,
             on_click: None,
             _phantom: Default::default(),
@@ -98,71 +68,6 @@ where
     pub fn height(self, height: impl Into<iced::Length>) -> Self {
         VideoPlayer {
             height: height.into(),
-            ..self
-        }
-    }
-
-    /// Sets the timeout of the overlay in seconds.
-    pub fn overlay_timeout(self, timeout: u64) -> Self {
-        Self {
-            overlay_timeout: timeout,
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Message` produced by the play/pause/restart
-    /// overlay.
-    pub fn play_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            play_pause: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Messaged` produced by the next overlay.
-    pub fn next_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            next: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Messaged` produced by the previous overlay.
-    pub fn previous_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            previous: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Messaged` produced by the fullscreen overlay.
-    pub fn fullscreen_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            fullscreen: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets the font used for the video speed on the overlay
-    pub fn speed_font(self, font: Renderer::Font) -> Self {
-        VideoPlayer {
-            speed_font: Some(font),
-            ..self
-        }
-    }
-
-    /// Sets the [`Icon`] used for, and the `Messaged` produced by the captions overlay.
-    pub fn subtitles_icon(self, icon: Icon<Renderer::Font>, message: Message) -> Self {
-        VideoPlayer {
-            captions: Some((icon, message)),
-            ..self
-        }
-    }
-
-    /// Sets whether the overlay is enabled for video playback.
-    pub fn enable_overlay(self, enable: bool) -> Self {
-        VideoPlayer {
-            enable_overlay: enable,
             ..self
         }
     }
@@ -229,7 +134,7 @@ impl<Message, Theme, Renderer> Widget<Message, Theme, Renderer>
     for VideoPlayer<'_, Message, Theme, Renderer>
 where
     Message: Clone,
-    Renderer: PrimitiveRenderer + text::Renderer,
+    Renderer: PrimitiveRenderer,
 {
     fn size(&self) -> iced::Size<iced::Length> {
         iced::Size {
@@ -395,7 +300,6 @@ where
                 state.last_update = Some(Update {
                     time: Instant::now(),
                     parent: Some(click.position()),
-                    overlay: None,
                 })
             }
             Event::Mouse(mouse::Event::WheelScrolled { delta })
@@ -419,7 +323,6 @@ where
                 state.last_update = Some(Update {
                     time: Instant::now(),
                     parent: cursor.position_over(layout.bounds()),
-                    overlay: None,
                 })
             }
             Event::Mouse(mouse::Event::CursorMoved { .. })
@@ -427,17 +330,15 @@ where
             | Event::Mouse(mouse::Event::CursorEntered) => {
                 let state = state.state.downcast_mut::<State>();
                 state.last_update = match state.last_update {
-                    Some(Update { time, overlay, .. }) => Some(Update {
+                    Some(Update { time, .. }) => Some(Update {
                         time,
                         parent: cursor.position_over(layout.bounds()),
-                        overlay,
                     }),
                     None => {
                         if cursor.is_over(layout.bounds()) {
                             Some(Update {
                                 time: Instant::now(),
                                 parent: cursor.position_over(layout.bounds()),
-                                overlay: None,
                             })
                         } else {
                             None
@@ -509,35 +410,18 @@ where
                     Some(Update {
                         parent: position,
                         time,
-                        overlay,
                     }) if position.is_some() => {
                         if cursor.position_over(layout.bounds()) == position
-                            && Instant::now().duration_since(time).as_secs() >= self.overlay_timeout
+                            && Instant::now().duration_since(time).as_secs() >= 3
                         {
                         } else {
                             state.last_update = Some(Update {
                                 time,
                                 parent: position,
-                                overlay,
                             })
                         }
                     }
-                    Some(Update {
-                        parent: None,
-                        overlay: None,
-                        ..
-                    }) => {}
-                    Some(Update {
-                        overlay,
-                        parent,
-                        time,
-                    }) if overlay.is_some() => {
-                        state.last_update = Some(Update {
-                            time,
-                            parent,
-                            overlay,
-                        });
-                    }
+                    Some(Update { parent: None, .. }) => {}
                     _ => {}
                 }
             }
@@ -565,49 +449,6 @@ where
             mouse::Interaction::Hidden
         }
     }
-
-    fn overlay<'a>(
-        &'a mut self,
-        state: &'a mut widget::Tree,
-        layout: layout::Layout<'a>,
-        _renderer: &Renderer,
-        _viewport: &iced::Rectangle,
-        _translation: iced::Vector,
-    ) -> Option<overlay::Element<'a, Message, Theme, Renderer>> {
-        let state = state.state.downcast_mut::<State>();
-        if !self.enable_overlay || state.last_update.is_none() {
-            return None;
-        }
-        let inner = self.video.read();
-
-        // bounds based on `Image::draw`
-        let image_size = iced::Size::new(inner.width as f32, inner.height as f32);
-        let bounds = layout.bounds();
-        let adjusted_fit = self.content_fit.fit(image_size, bounds.size());
-        let scale = Vector::new(
-            adjusted_fit.width / image_size.width,
-            adjusted_fit.height / image_size.height,
-        );
-        let final_size = image_size * scale;
-
-        let position = match self.content_fit {
-            iced::ContentFit::None => iced::Point::new(
-                bounds.x + (image_size.width - adjusted_fit.width) / 2.0,
-                bounds.y + (image_size.height - adjusted_fit.height) / 2.0,
-            ),
-            _ => iced::Point::new(
-                bounds.center_x() - final_size.width / 2.0,
-                bounds.center_y() - final_size.height / 2.0,
-            ),
-        };
-
-        let bounds = iced::Rectangle::new(position, final_size);
-
-        let speed = self.video.speed();
-
-        let overlay = VideoOverlay::new(state, self, bounds, speed);
-        Some(overlay::Element::new(Box::new(overlay)))
-    }
 }
 
 impl<'a, Message, Theme, Renderer> From<VideoPlayer<'a, Message, Theme, Renderer>>
@@ -615,7 +456,7 @@ impl<'a, Message, Theme, Renderer> From<VideoPlayer<'a, Message, Theme, Renderer
 where
     Message: 'a + Clone,
     Theme: 'a,
-    Renderer: 'a + PrimitiveRenderer + text::Renderer,
+    Renderer: 'a + PrimitiveRenderer,
 {
     fn from(video_player: VideoPlayer<'a, Message, Theme, Renderer>) -> Self {
         Self::new(video_player)
@@ -642,7 +483,6 @@ impl State {
 pub(crate) struct Update {
     pub time: Instant,
     pub parent: Option<Point>,
-    pub overlay: Option<Point>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

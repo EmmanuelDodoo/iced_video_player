@@ -34,7 +34,6 @@
 //!
 //! You can programmatically control the video (e.g., seek, pause, loop, grab thumbnails) by accessing various methods on [`Video`].
 
-mod overlay;
 mod pipeline;
 mod video;
 mod video_player;
