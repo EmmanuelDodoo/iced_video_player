@@ -1,15 +1,15 @@
 use crate::{pipeline::VideoPrimitive, video::Video};
 use gstreamer as gst;
-pub use iced::advanced::mouse::{click::Kind, Button, ScrollDelta};
+pub use iced::advanced::mouse::{Button, ScrollDelta, click::Kind};
 #[allow(unused_imports)]
-pub use iced::keyboard::{key, Key, Modifiers};
+pub use iced::keyboard::{Key, Modifiers, key};
 use iced::{
+    Element, Event, Point,
     advanced::{
-        self, layout, mouse,
+        self, Widget, layout, mouse,
         widget::{self, tree},
-        Widget,
     },
-    keyboard, window, Element, Event, Point,
+    keyboard, window,
 };
 use iced_wgpu::primitive::Renderer as PrimitiveRenderer;
 use log::error;

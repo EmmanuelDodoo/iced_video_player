@@ -1,7 +1,6 @@
 use iced::{
-    font,
-    widget::{Button, Column, Container, Row, Slider, Text},
     Element, Task,
+    widget::{Button, Column, Container, Row, Slider, Text},
 };
 use iced_video_player::{Video, VideoPlayer};
 use std::time::Duration;
@@ -12,29 +11,23 @@ fn main() -> iced::Result {
 
 #[derive(Clone, Debug)]
 enum Message {
-    FontLoaded(Result<(), font::Error>),
     TogglePause,
     ToggleLoop,
     Seek(f64),
     SeekRelease,
     EndOfStream,
     NewFrame,
-    None,
 }
 
 struct App {
     video: Video,
     position: f64,
     dragging: bool,
-    fullscreen: bool,
 }
 
 impl App {
     fn boot() -> (Self, Task<Message>) {
-        let task =
-            font::load(include_bytes!("../assets/minimal.ttf").as_slice()).map(Message::FontLoaded);
-
-        (Self::new(), task)
+        (Self::new(), Task::none())
     }
 
     fn new() -> Self {
@@ -50,42 +43,22 @@ impl App {
             .unwrap(),
         )
         .unwrap();
-        video.set_gamma(1.5);
+        video.set_gamma(1.3);
 
         App {
             video,
             position: 0.0,
             dragging: false,
-            fullscreen: false,
         }
     }
 
     fn update(&mut self, message: Message) -> Task<Message> {
         match message {
-            Message::None => {}
-            Message::FontLoaded(Err(error)) => {
-                eprintln!("Couldn't load font: \n{error:?}");
-            }
-            Message::FontLoaded(Ok(_)) => {}
             Message::TogglePause => {
                 self.video.set_paused(!self.video.paused());
             }
             Message::ToggleLoop => {
-                // self.video.set_looping(!self.video.looping());
-                self.fullscreen = !self.fullscreen;
-                let fullscreen = self.fullscreen;
-                return iced::window::latest()
-                    .and_then(move |id| {
-                        iced::window::set_mode::<()>(
-                            id,
-                            if fullscreen {
-                                iced::window::Mode::Fullscreen
-                            } else {
-                                iced::window::Mode::Windowed
-                            },
-                        )
-                    })
-                    .map(|_| Message::None);
+                self.video.set_looping(!self.video.looping());
             }
             Message::Seek(secs) => {
                 self.dragging = true;
