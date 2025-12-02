@@ -1,5 +1,5 @@
 use crate::video::Frame;
-use iced_wgpu::primitive::Primitive;
+use iced_wgpu::primitive::{Pipeline, Primitive};
 use iced_wgpu::wgpu;
 use std::{
     collections::{BTreeMap, btree_map::Entry},
@@ -389,6 +389,15 @@ impl VideoPipeline {
     }
 }
 
+impl Pipeline for VideoPipeline {
+    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self
+    where
+        Self: Sized,
+    {
+        Self::new(device, format)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct VideoPrimitive {
     video_id: u64,
@@ -417,20 +426,11 @@ impl VideoPrimitive {
 }
 
 impl Primitive for VideoPrimitive {
-    type Renderer = VideoPipeline;
-
-    fn initialize(
-        &self,
-        device: &wgpu::Device,
-        _queue: &wgpu::Queue,
-        format: wgpu::TextureFormat,
-    ) -> Self::Renderer {
-        VideoPipeline::new(device, format)
-    }
+    type Pipeline = VideoPipeline;
 
     fn prepare(
         &self,
-        renderer: &mut Self::Renderer,
+        renderer: &mut Self::Pipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         bounds: &iced_core::Rectangle,
@@ -463,13 +463,13 @@ impl Primitive for VideoPrimitive {
         );
     }
 
-    fn draw(&self, _renderer: &Self::Renderer, _render_pass: &mut wgpu::RenderPass<'_>) -> bool {
+    fn draw(&self, _renderer: &Self::Pipeline, _render_pass: &mut wgpu::RenderPass<'_>) -> bool {
         false
     }
 
     fn render(
         &self,
-        renderer: &Self::Renderer,
+        renderer: &Self::Pipeline,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         clip_bounds: &iced_wgpu::core::Rectangle<u32>,

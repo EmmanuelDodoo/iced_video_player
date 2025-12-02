@@ -16,10 +16,10 @@ exclude = [
 ]
 
 [dependencies]
-iced = { git = "https://github.com/iced-rs/iced", rev = "c67f523", features = ["image", "advanced", "wgpu"] }
-iced_wgpu = { git  = "https://github.com/iced-rs/iced/", rev = "c67f523", package = "iced_wgpu"}
-iced_core = { git  = "https://github.com/iced-rs/iced/", rev = "c67f523", package = "iced_core"}
-iced_graphics = { git  = "https://github.com/iced-rs/iced/", rev = "c67f523", package = "iced_graphics"}
+iced = { git = "https://github.com/iced-rs/iced", rev = "c566845", features = ["image", "advanced", "wgpu"] }
+iced_wgpu = { git  = "https://github.com/iced-rs/iced/", rev = "c566845", package = "iced_wgpu"}
+iced_core = { git  = "https://github.com/iced-rs/iced/", rev = "c566845", package = "iced_core"}
+iced_graphics = { git  = "https://github.com/iced-rs/iced/", rev = "c566845", package = "iced_graphics"}
 gstreamer = "0.23"
 gstreamer-app = "0.23" # appsink
 gstreamer-base = "0.23" # basesrc
