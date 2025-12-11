@@ -11,40 +11,56 @@ authors = ["jazzfool"]
 edition = "2024"
 resolver = "2"
 license = "MIT OR Apache-2.0"
-exclude = [
-    ".media/test.mp4"
-]
-
-[dependencies]
-iced = { git = "https://github.com/iced-rs/iced", rev = "c67f523", features = ["image", "advanced", "wgpu"] }
-iced_wgpu = { git  = "https://github.com/iced-rs/iced/", rev = "c67f523", package = "iced_wgpu"}
-iced_core = { git  = "https://github.com/iced-rs/iced/", rev = "c67f523", package = "iced_core"}
-iced_graphics = { git  = "https://github.com/iced-rs/iced/", rev = "c67f523", package = "iced_graphics"}
-gstreamer = "0.23"
-gstreamer-app = "0.23" # appsink
-gstreamer-base = "0.23" # basesrc
-gstreamer-video = "0.23" # VideoMeta
-glib = "0.20" # gobject traits and error type
-log = "0.4"
-thiserror = "1"
-url = "2" # media uri
+exclude = [".media/test.mp4"]
 
 [package.metadata.nix]
 systems = ["x86_64-linux"]
 app = true
 build = true
 runtimeLibs = [
-    "vulkan-loader",
-    "wayland",
-    "wayland-protocols",
-    "libxkbcommon",
-    "xorg.libX11",
-    "xorg.libXrandr",
-    "xorg.libXi", "gst_all_1.gstreamer", "gst_all_1.gstreamermm", "gst_all_1.gst-plugins-bad", "gst_all_1.gst-plugins-ugly", "gst_all_1.gst-plugins-good", "gst_all_1.gst-plugins-base",
+  "vulkan-loader",
+  "wayland",
+  "wayland-protocols",
+  "libxkbcommon",
+  "xorg.libX11",
+  "xorg.libXrandr",
+  "xorg.libXi",
+  "gst_all_1.gstreamer",
+  "gst_all_1.gstreamermm",
+  "gst_all_1.gst-plugins-bad",
+  "gst_all_1.gst-plugins-ugly",
+  "gst_all_1.gst-plugins-good",
+  "gst_all_1.gst-plugins-base",
 ]
-buildInputs = ["libxkbcommon", "gst_all_1.gstreamer", "gst_all_1.gstreamermm", "gst_all_1.gst-plugins-bad", "gst_all_1.gst-plugins-ugly", "gst_all_1.gst-plugins-good", "gst_all_1.gst-plugins-base"]
+buildInputs = [
+  "libxkbcommon",
+  "gst_all_1.gstreamer",
+  "gst_all_1.gstreamermm",
+  "gst_all_1.gst-plugins-bad",
+  "gst_all_1.gst-plugins-ugly",
+  "gst_all_1.gst-plugins-good",
+  "gst_all_1.gst-plugins-base"
+]
 
 [package.metadata.docs.rs]
 rustc-args = ["--cfg", "docsrs"]
 rustdoc-args = ["--cfg", "docsrs"]
 targets = ["wasm32-unknown-unknown"]
+
+[dependencies]
+glib = "0.20"  # gobject traits and error type
+gstreamer = "0.23"
+gstreamer-app = "0.23"  # appsink
+gstreamer-base = "0.23"  # basesrc
+gstreamer-video = "0.23"  # VideoMeta
+iced = { git = "https://github.com/iced-rs/iced", rev = "74ac7fc", features = [
+  "advanced",
+  "image",
+  "wgpu"
+] }
+iced_core = { package = "iced_core", git = "https://github.com/iced-rs/iced/", rev = "74ac7fc" }
+# iced_graphics = { package = "iced_graphics", git = "https://github.com/iced-rs/iced/", rev = "74ac7fc" }
+iced_wgpu = { package = "iced_wgpu", git = "https://github.com/iced-rs/iced/", rev = "74ac7fc" }
+log = "0.4"
+thiserror = "1"
+url = "2"  # media uri
