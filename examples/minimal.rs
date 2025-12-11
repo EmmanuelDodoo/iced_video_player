@@ -31,7 +31,7 @@ impl App {
     }
 
     fn new() -> Self {
-        let mut video = Video::new(
+        let video = Video::new(
             &url::Url::from_file_path(
                 std::path::PathBuf::from(file!())
                     .parent()
@@ -43,7 +43,6 @@ impl App {
             .unwrap(),
         )
         .unwrap();
-        video.set_gamma(1.3);
 
         App {
             video,

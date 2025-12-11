@@ -28,15 +28,15 @@ struct VideoEntry {
     render_index: AtomicUsize,
 }
 
-pub struct VideoPipeline {
+pub(crate) struct VideoPipeline {
     pipeline: wgpu::RenderPipeline,
     bg0_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     videos: BTreeMap<u64, VideoEntry>,
 }
 
-impl VideoPipeline {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+impl Pipeline for VideoPipeline {
+    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("iced_video_player shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
@@ -97,7 +97,7 @@ impl VideoPipeline {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 buffers: &[],
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                compilation_options: Default::default(),
             },
             primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
@@ -108,13 +108,13 @@ impl VideoPipeline {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: None,
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
+                compilation_options: Default::default(),
             }),
             multiview: None,
             cache: None,
@@ -143,6 +143,23 @@ impl VideoPipeline {
         }
     }
 
+    fn trim(&mut self) {
+        let ids: Vec<_> = self
+            .videos
+            .iter()
+            .filter_map(|(id, entry)| (!entry.alive.load(Ordering::SeqCst)).then_some(*id))
+            .collect();
+        for id in ids {
+            if let Some(video) = self.videos.remove(&id) {
+                video.texture_y.destroy();
+                video.texture_uv.destroy();
+                video.instances.destroy();
+            }
+        }
+    }
+}
+
+impl VideoPipeline {
     fn upload(
         &mut self,
         device: &wgpu::Device,
@@ -195,7 +212,7 @@ impl VideoPipeline {
                 mip_level_count: None,
                 base_array_layer: 0,
                 array_layer_count: None,
-                usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
+                usage: None,
             });
 
             let view_uv = texture_uv.create_view(&wgpu::TextureViewDescriptor {
@@ -207,7 +224,7 @@ impl VideoPipeline {
                 mip_level_count: None,
                 base_array_layer: 0,
                 array_layer_count: None,
-                usage: Some(wgpu::TextureUsages::TEXTURE_BINDING),
+                usage: None,
             });
 
             let instances = device.create_buffer(&wgpu::BufferDescriptor {
@@ -303,22 +320,7 @@ impl VideoPipeline {
         );
     }
 
-    fn cleanup(&mut self) {
-        let ids: Vec<_> = self
-            .videos
-            .iter()
-            .filter_map(|(id, entry)| (!entry.alive.load(Ordering::SeqCst)).then_some(*id))
-            .collect();
-        for id in ids {
-            if let Some(video) = self.videos.remove(&id) {
-                video.texture_y.destroy();
-                video.texture_uv.destroy();
-                video.instances.destroy();
-            }
-        }
-    }
-
-    fn prepare(&mut self, queue: &wgpu::Queue, video_id: u64, bounds: &iced_wgpu::core::Rectangle) {
+    fn prepare(&mut self, queue: &wgpu::Queue, video_id: u64, bounds: &iced::Rectangle) {
         if let Some(video) = self.videos.get_mut(&video_id) {
             let uniforms = Uniforms {
                 rect: [
@@ -343,8 +345,6 @@ impl VideoPipeline {
             video.prepare_index.fetch_add(1, Ordering::Relaxed);
             video.render_index.store(0, Ordering::Relaxed);
         }
-
-        self.cleanup();
     }
 
     fn draw(
@@ -389,15 +389,6 @@ impl VideoPipeline {
     }
 }
 
-impl Pipeline for VideoPipeline {
-    fn new(device: &wgpu::Device, _queue: &wgpu::Queue, format: wgpu::TextureFormat) -> Self
-    where
-        Self: Sized,
-    {
-        Self::new(device, format)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub(crate) struct VideoPrimitive {
     video_id: u64,
@@ -430,17 +421,17 @@ impl Primitive for VideoPrimitive {
 
     fn prepare(
         &self,
-        renderer: &mut Self::Pipeline,
+        pipeline: &mut Self::Pipeline,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        bounds: &iced_core::Rectangle,
-        viewport: &iced_graphics::Viewport,
+        bounds: &iced::Rectangle,
+        viewport: &iced_wgpu::graphics::Viewport,
     ) {
         if self.upload_frame {
             let frame_guard = self.frame.lock().expect("lock frame mutex");
             let stride = frame_guard.stride();
             if let Some(readable) = frame_guard.readable() {
-                renderer.upload(
+                pipeline.upload(
                     device,
                     queue,
                     self.video_id,
@@ -452,7 +443,7 @@ impl Primitive for VideoPrimitive {
             };
         }
 
-        renderer.prepare(
+        pipeline.prepare(
             queue,
             self.video_id,
             &(*bounds
@@ -469,11 +460,11 @@ impl Primitive for VideoPrimitive {
 
     fn render(
         &self,
-        renderer: &Self::Pipeline,
+        pipeline: &Self::Pipeline,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         clip_bounds: &iced_wgpu::core::Rectangle<u32>,
     ) {
-        renderer.draw(target, encoder, clip_bounds, self.video_id);
+        pipeline.draw(target, encoder, clip_bounds, self.video_id);
     }
 }
