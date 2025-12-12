@@ -42,7 +42,7 @@ use gstreamer as gst;
 use thiserror::Error;
 
 pub use video::Position;
-pub use video::{Video, VideoFilters};
+pub use video::{ AudioTag, TextTag, Video, VideoFilters};
 pub use video_player::*;
 
 #[derive(Debug, Error)]
