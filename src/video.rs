@@ -971,7 +971,7 @@ fn yuv_to_rgba(
     rgba
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 /// Subtitle meta data.
 pub struct TextTag {
     id: i32,
@@ -981,7 +981,13 @@ pub struct TextTag {
     pub title: String,
 }
 
-#[derive(Debug, Clone)]
+impl std::fmt::Display for TextTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} - {}", self.title, self.language_code)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 /// Audio meta data.
 pub struct AudioTag {
     id: i32,
@@ -991,6 +997,12 @@ pub struct AudioTag {
     pub codec: String,
     /// The audio title
     pub title: String,
+}
+
+impl std::fmt::Display for AudioTag {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} - {}", self.title, self.language_code)
+    }
 }
 
 fn get_audio(pipeline: &gst::Pipeline, id: i32) -> Option<AudioTag> {
