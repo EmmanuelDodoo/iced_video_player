@@ -345,7 +345,10 @@ impl Video {
     pub fn new(uri: &url::Url) -> Result<Self, Error> {
         gst::init()?;
 
-        let pipeline = format!("playbin uri=\"{}\"  video-sink=\"videoscale ! videoconvert ! appsink name=iced_video drop=true caps=video/x-raw,format=NV12,pixel-aspect-ratio=1/1\" video-filter=\"videobalance name=balance ! gamma name=gamma\" audio-filter= \"pitch name=pitch\"", uri.as_str());
+        let pipeline = format!(
+            "playbin uri=\"{}\"  video-sink=\"videoscale ! videoconvert ! appsink name=iced_video drop=true caps=video/x-raw,format=NV12,pixel-aspect-ratio=1/1\" video-filter=\"videobalance name=balance ! gamma name=gamma\" audio-filter= \"pitch name=pitch\"",
+            uri.as_str()
+        );
         let pipeline = gst::parse::launch(pipeline.as_ref())?
             .downcast::<gst::Pipeline>()
             .map_err(|_| Error::Cast)?;
