@@ -59,7 +59,6 @@ iced = { git = "https://github.com/iced-rs/iced", rev = "74ac7fc", features = [
   "wgpu"
 ] }
 iced_core = { package = "iced_core", git = "https://github.com/iced-rs/iced/", rev = "74ac7fc" }
-# iced_graphics = { package = "iced_graphics", git = "https://github.com/iced-rs/iced/", rev = "74ac7fc" }
 iced_wgpu = { package = "iced_wgpu", git = "https://github.com/iced-rs/iced/", rev = "74ac7fc" }
 log = "0.4"
 thiserror = "1"
