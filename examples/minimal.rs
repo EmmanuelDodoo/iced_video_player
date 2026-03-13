@@ -78,7 +78,7 @@ impl App {
         }
     }
 
-    fn view(&self) -> Element<Message> {
+    fn view(&self) -> Element<'_, Message> {
         Column::new()
             .push(
                 Container::new(

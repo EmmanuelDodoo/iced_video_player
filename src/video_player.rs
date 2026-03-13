@@ -273,18 +273,17 @@ where
                     inner.set_paused(true);
                 }
 
-                if inner.upload_frame.load(Ordering::SeqCst) {
-                    if let Some(on_new_frame) = self.on_new_frame.clone() {
-                        shell.publish(on_new_frame);
-                    }
+                if inner.upload_frame.load(Ordering::SeqCst)
+                    && let Some(on_new_frame) = self.on_new_frame.clone()
+                {
+                    shell.publish(on_new_frame);
                 }
 
-                if let Some(on_subtitle_text) = &self.on_subtitle_text {
-                    if inner.upload_text.swap(false, Ordering::SeqCst) {
-                        if let Ok(text) = inner.subtitle_text.try_lock() {
-                            shell.publish(on_subtitle_text(text.clone()));
-                        }
-                    }
+                if let Some(on_subtitle_text) = &self.on_subtitle_text
+                    && inner.upload_text.swap(false, Ordering::SeqCst)
+                    && let Ok(text) = inner.subtitle_text.try_lock()
+                {
+                    shell.publish(on_subtitle_text(text.clone()));
                 }
 
                 shell.request_redraw();
