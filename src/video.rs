@@ -553,6 +553,14 @@ impl Video {
         )
     }
 
+    /// Get the current playback position in frames.
+    pub fn frame_position(&self) -> u64 {
+        self.read()
+            .source
+            .query_position::<gst::format::Default>()
+            .map_or(0, |pos| pos.into())
+    }
+
     /// Get the media duration.
     pub fn duration(&self) -> Duration {
         self.read().duration
