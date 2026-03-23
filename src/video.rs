@@ -532,6 +532,17 @@ impl Video {
         self.get_mut().seek(position, accurate)
     }
 
+    /// Steps forward exactly one frame in playback.
+    /// This can be especially useful while the video is paused to make pipeline changes visible, without resuming playback.
+    pub fn step_one_frame(&mut self) {
+        self.get_mut().source.send_event(gst::event::Step::new(
+            gst::GenericFormattedValue::Buffers(Some(gst::format::Buffers::from_u64(1))),
+            1.0,
+            true,
+            false,
+        ));
+    }
+
     /// Set the playback speed of the media.
     /// The default speed is `1.0`.
     pub fn set_speed(&mut self, speed: f64) -> Result<(), Error> {
