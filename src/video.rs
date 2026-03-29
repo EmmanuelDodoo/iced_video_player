@@ -249,7 +249,7 @@ impl Internal {
             self.sync_av_counter += 1;
             self.sync_av_avg = self.sync_av_avg * (self.sync_av_counter - 1) / self.sync_av_counter
                 + offset.as_nanos() as u64 / self.sync_av_counter;
-            if self.sync_av_counter % 128 == 0 {
+            if self.sync_av_counter.is_multiple_of(128) {
                 self.source
                     .set_property("av-offset", -(self.sync_av_avg as i64));
             }
@@ -300,12 +300,12 @@ impl Drop for Video {
             .expect("failed to set state");
 
         inner.alive.store(false, Ordering::SeqCst);
-        if let Some(worker) = inner.worker.take() {
-            if let Err(err) = worker.join() {
-                match err.downcast_ref::<String>() {
-                    Some(e) => log::error!("Video thread panicked: {e}"),
-                    None => log::error!("Video thread panicked with unknown reason"),
-                }
+        if let Some(worker) = inner.worker.take()
+            && let Err(err) = worker.join()
+        {
+            match err.downcast_ref::<String>() {
+                Some(e) => log::error!("Video thread panicked: {e}"),
+                None => log::error!("Video thread panicked with unknown reason"),
             }
         }
     }
@@ -474,16 +474,14 @@ impl Video {
 
                     upload_frame_ref.swap(true, Ordering::SeqCst);
 
-                    if let Some(at) = clear_subtitles_at {
-                        if frame_pts >= at {
-                            *subtitle_text_ref
-                                .lock()
-                                .map_err(|_| gst::FlowError::Error)? = None;
-
-                            upload_text_ref.store(true, Ordering::SeqCst);
-
-                            clear_subtitles_at = None;
-                        }
+                    if let Some(at) = clear_subtitles_at
+                        && frame_pts >= at
+                    {
+                        *subtitle_text_ref
+                            .lock()
+                            .map_err(|_| gst::FlowError::Error)? = None;
+                        upload_text_ref.store(true, Ordering::SeqCst);
+                        clear_subtitles_at = None;
                     }
 
                     let text = text_sink
@@ -793,6 +791,17 @@ impl Video {
     /// however, it is also slower. For most seeks (e.g., scrubbing) this is not needed.
     pub fn seek(&mut self, position: impl Into<Position>, accurate: bool) -> Result<(), Error> {
         self.get_mut().seek(position, accurate)
+    }
+
+    /// Steps forward exactly one frame in playback.
+    /// This can be especially useful while the video is paused to make pipeline changes visible, without resuming playback.
+    pub fn step_one_frame(&mut self) {
+        self.get_mut().source.send_event(gst::event::Step::new(
+            gst::GenericFormattedValue::Buffers(Some(gst::format::Buffers::from_u64(1))),
+            1.0,
+            true,
+            false,
+        ));
     }
 
     /// Set the playback speed of the media.
