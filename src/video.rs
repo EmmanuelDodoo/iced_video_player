@@ -284,6 +284,10 @@ impl Internal {
     fn set_audio(&mut self, audio: AudioTag) {
         self.source.set_property("current-audio", audio.id);
     }
+
+    fn set_text_offset(&mut self, offset: i64) {
+        self.source.set_property("text-offset", -offset);
+    }
 }
 
 /// A multimedia video loaded from a URI (e.g., a local file path or HTTP stream).
@@ -856,6 +860,15 @@ impl Video {
                 .property::<Option<String>>("current-suburi")?,
         )
         .ok()
+    }
+
+    /// Control the synchonisation offset between the text and video streams in 
+    /// nano seconds.
+    ///
+    /// Positive values make the text ahead of the video, and negative values 
+    /// make the text go behind the video.
+    pub fn set_text_offset(&mut self, offset: i64){
+        self.get_mut().set_text_offset(offset);
     }
 
     /// Get the underlying GStreamer pipeline.
