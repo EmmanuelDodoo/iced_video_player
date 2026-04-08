@@ -462,10 +462,8 @@ impl Video {
                         .lock()
                         .map_err(|_| gst::FlowError::Error)? = Instant::now();
 
-                    let frame_segment = sample.segment().cloned().ok_or(gst::FlowError::Error)?;
                     let buffer = sample.buffer().ok_or(gst::FlowError::Error)?;
                     let frame_pts = buffer.pts().ok_or(gst::FlowError::Error)?;
-                    let frame_duration = buffer.duration().ok_or(gst::FlowError::Error)?;
                     {
                         let mut frame_guard =
                             frame_ref.lock().map_err(|_| gst::FlowError::Error)?;
@@ -489,39 +487,21 @@ impl Video {
                         .and_then(|sink| sink.try_pull_sample(gst::ClockTime::from_seconds(0)));
 
                     if let Some(text) = text {
-                        let text_segment = text.segment().ok_or(gst::FlowError::Error)?;
                         let text = text.buffer().ok_or(gst::FlowError::Error)?;
-                        let text_pts = text.pts().ok_or(gst::FlowError::Error)?;
                         let text_duration = text.duration().ok_or(gst::FlowError::Error)?;
 
-                        let frame_running_time = frame_segment.to_running_time(frame_pts).value();
-                        let frame_running_time_end = frame_segment
-                            .to_running_time(frame_pts + frame_duration)
-                            .value();
-
-                        let text_running_time = text_segment.to_running_time(text_pts).value();
-                        let text_running_time_end = text_segment
-                            .to_running_time(text_pts + text_duration)
-                            .value();
-
-                        // see gst-plugins-base/ext/pango/gstbasetextoverlay.c (gst_base_text_overlay_video_chain)
-                        // as an example of how to correctly synchronize the text+video segments
-                        if text_running_time_end > frame_running_time
-                            && frame_running_time_end > text_running_time
-                        {
-                            let duration = text.duration().unwrap_or(gst::ClockTime::ZERO);
-                            let map = text.map_readable().map_err(|_| gst::FlowError::Error)?;
-
-                            let text = std::str::from_utf8(map.as_slice())
-                                .map_err(|_| gst::FlowError::Error)?
-                                .to_string();
-                            *subtitle_text_ref
-                                .lock()
-                                .map_err(|_| gst::FlowError::Error)? = Some(text);
-                            upload_text_ref.store(true, Ordering::SeqCst);
-
-                            clear_subtitles_at = Some(text_pts + duration);
-                        }
+                        let map = text.map_readable().map_err(|_| gst::FlowError::Error)?;
+                        let text = std::str::from_utf8(map.as_slice())
+                            .map_err(|_| gst::FlowError::Error)?
+                            .to_string();
+                        *subtitle_text_ref
+                            .lock()
+                            .map_err(|_| gst::FlowError::Error)? = Some(text);
+                        upload_text_ref.store(true, Ordering::SeqCst);
+                        // should be text_pts + text_duration
+                        // but playbin can specify text-offset which does not update the text buffer pts
+                        // so we'll just take it as starting on this frame
+                        clear_subtitles_at = Some(frame_pts + text_duration);
                     }
 
                     Ok(())
