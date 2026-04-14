@@ -992,7 +992,8 @@ impl std::fmt::Display for TextTag {
 #[derive(Debug, Clone, PartialEq)]
 /// Audio meta data.
 pub struct AudioTag {
-    id: i32,
+    /// The audio index
+    pub id: i32,
     /// The audio language.
     pub language_code: String,
     /// the audio codec
