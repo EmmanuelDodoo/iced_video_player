@@ -24,13 +24,13 @@ gstreamer = "0.23"
 gstreamer-app = "0.23"  # appsink
 gstreamer-base = "0.23"  # basesrc
 gstreamer-video = "0.23"  # VideoMeta
-iced = { git = "https://github.com/iced-rs/iced", rev = "4f02d83", features = [
+iced = { git = "https://github.com/iced-rs/iced", rev = "4e0bdcf", features = [
   "advanced",
   "image",
   "wgpu"
 ] }
-iced_core = { package = "iced_core", git = "https://github.com/iced-rs/iced/", rev = "4f02d83" }
-iced_wgpu = { package = "iced_wgpu", git = "https://github.com/iced-rs/iced/", rev = "4f02d83" }
+iced_core = { package = "iced_core", git = "https://github.com/iced-rs/iced/", rev = "4e0bdcf" }
+iced_wgpu = { package = "iced_wgpu", git = "https://github.com/iced-rs/iced/", rev = "4e0bdcf" }
 log = "0.4"
 thiserror = "1"
 url = "2"  # media uri
