@@ -46,8 +46,8 @@ where
         VideoPlayer {
             video,
             content_fit: iced::ContentFit::default(),
-            width: iced::Length::Shrink,
-            height: iced::Length::Shrink,
+            width: iced::Length::Fit,
+            height: iced::Length::Fit,
             on_end_of_stream: None,
             on_new_frame: None,
             on_subtitle_text: None,
@@ -152,8 +152,8 @@ where
 {
     fn size(&self) -> iced::Size<iced::Length> {
         iced::Size {
-            width: iced::Length::Shrink,
-            height: iced::Length::Shrink,
+            width: self.width,
+            height: self.height,
         }
     }
 

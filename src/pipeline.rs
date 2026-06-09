@@ -86,7 +86,7 @@ impl Pipeline for VideoPipeline {
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("iced_video_player pipeline layout"),
-            bind_group_layouts: &[&bg0_layout],
+            bind_group_layouts: &[Some(&bg0_layout)],
             immediate_size: 0,
         });
 
